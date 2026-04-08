@@ -73,6 +73,6 @@ EchoRankedServerBot/
   Handlers/                  # Discord event handlers (ready, messages, channels)
   Models/                    # Domain models (Match, Stats, Nakama, Streaming, etc.)
   Services/                  # Core logic (NakamaApi, MatchLifecycle, AltDetection,
-                             #   Scoreboard, NeatQueue, ServerDecision, and more)
+                             # Scoreboard, NeatQueue, ServerDecision, and more)
   Assets/                    # Image assets for scoreboard rendering
 ```
