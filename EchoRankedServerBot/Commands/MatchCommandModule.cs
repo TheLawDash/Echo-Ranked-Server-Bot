@@ -9,7 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace EchoRankedServerBot.Commands;
 
-public abstract class MatchCommandModule(
+public class MatchCommandModule(
     MatchStateService matchState,
     MatchLifecycleService lifecycle,
     MatchMonitorCoordinator monitorCoordinator,
@@ -264,7 +264,9 @@ public abstract class MatchCommandModule(
     [SlashCommand("manual-pull", "Pull a server on a selected region.")]
     public async Task TestCommandAsync()
     {
-        if (Context.User.Id != options.Value.OwnerUserId)
+        var user = Context.User as SocketGuildUser;
+        var isEligible = user?.Roles.Any(role => role.Id == options.Value.AdminRoleId) == true || user?.Id == options.Value.OwnerUserId;
+        if (!isEligible)
         {
             await RespondAsync("You do not have permission to use this command.", ephemeral: true);
             return;

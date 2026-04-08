@@ -56,15 +56,27 @@ public class DiscordBotService(
         logger.LogInformation("Discord bot stopped");
     }
 
-    private async Task OnReadyAsync()
+    private Task OnReadyAsync()
     {
-        // Register slash commands
-        await interactions.AddModuleAsync<MatchCommandModule>(services);
-        await interactions.RegisterCommandsToGuildAsync(options.Value.GuildId);
-        logger.LogInformation("Slash commands registered to guild {GuildId}", options.Value.GuildId);
+        // Run on a background thread to avoid blocking the gateway task
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await interactions.AddModuleAsync<MatchCommandModule>(services);
+                await interactions.RegisterCommandsToGuildAsync(options.Value.GuildId, true);
+                logger.LogInformation("Slash commands registered to guild {GuildId}", options.Value.GuildId);
 
-        var handler = services.GetRequiredService<ReadyHandler>();
-        await handler.HandleReadyAsync();
+                var handler = services.GetRequiredService<ReadyHandler>();
+                await handler.HandleReadyAsync();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in Ready handler");
+            }
+        });
+
+        return Task.CompletedTask;
     }
 
     private async Task OnMessageReceivedAsync(SocketMessage message)
@@ -99,8 +111,11 @@ public class DiscordBotService(
 
     private async Task OnInteractionCreatedAsync(SocketInteraction interaction)
     {
+        logger.LogInformation("Interaction received: Type={Type}, Id={Id}", interaction.Type, interaction.Id);
         var ctx = new SocketInteractionContext(client, interaction);
-        await interactions.ExecuteCommandAsync(ctx, services);
+        var result = await interactions.ExecuteCommandAsync(ctx, services);
+        if (!result.IsSuccess)
+            logger.LogError("Interaction failed: {Error} ({ErrorReason})", result.Error, result.ErrorReason);
     }
 
     private Task LogAsync(LogMessage msg)
