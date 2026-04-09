@@ -142,3 +142,4 @@ paket-files/
 local.settings.json
 *.claude
 EchoRankedServerBot/appsettings.json
+EchoTelemetryCli/appsettings.json
