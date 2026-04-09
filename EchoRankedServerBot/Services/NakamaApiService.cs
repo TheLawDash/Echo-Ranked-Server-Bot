@@ -259,15 +259,15 @@ public class NakamaApiService(
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.PrepareEndpoint}";
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
 
-        var roleAssignments = BuildRoleAssignments(players);
+        var teamAlignments = BuildTeamAlignments(players);
 
         var prepareRequest = new PrepareEchoMatchRequest
         {
             Id = match.Id,
             GuildId = botOptions.Value.PrimaryGuildId,
-            RoleAlignments = roleAssignments,
-            Mode = "echo_arena_private",
-            SpawnedBy = botOptions.Value.SpawnedBy
+            OwnerId = botOptions.Value.SpawnedBy,
+            TeamAlignments = teamAlignments,
+            Mode = "echo_arena_private"
         };
 
         var requestData = JsonSerializer.Serialize(prepareRequest, new JsonSerializerOptions { WriteIndented = true });
@@ -306,15 +306,15 @@ public class NakamaApiService(
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.PrepareEndpoint}";
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
 
-        var roleAssignments = BuildRoleAssignments(players);
+        var teamAlignments = BuildTeamAlignments(players);
 
         var prepareRequest = new PrepareEchoMatchRequest
         {
             Id = match.Id,
             GuildId = botOptions.Value.BackupGuildId,
-            RoleAlignments = roleAssignments,
-            Mode = "echo_arena_private",
-            SpawnedBy = botOptions.Value.SpawnedBy
+            OwnerId = botOptions.Value.SpawnedBy,
+            TeamAlignments = teamAlignments,
+            Mode = "echo_arena_private"
         };
 
         var requestData = JsonSerializer.Serialize(prepareRequest, new JsonSerializerOptions { WriteIndented = true });
@@ -386,12 +386,12 @@ public class NakamaApiService(
         }
     }
 
-    private static Dictionary<string, int> BuildRoleAssignments(List<TeamOrientation>? players)
+    private static Dictionary<string, string> BuildTeamAlignments(List<TeamOrientation>? players)
     {
-        var roleAssignments = new Dictionary<string, int>();
+        var teamAlignments = new Dictionary<string, string>();
 
         if (players is null)
-            return roleAssignments;
+            return teamAlignments;
 
         foreach (var player in players)
         {
@@ -399,12 +399,12 @@ public class NakamaApiService(
                 continue;
 
             if (player.TeamName == "orange")
-                roleAssignments.Add(player.DiscordId, 0);
+                teamAlignments.Add(player.DiscordId, "0");
             if (player.TeamName == "blue")
-                roleAssignments.Add(player.DiscordId, 1);
+                teamAlignments.Add(player.DiscordId, "1");
         }
 
-        return roleAssignments;
+        return teamAlignments;
     }
 
     private static string ExtractMatchId(string responseContent)

@@ -7,15 +7,21 @@ public class PrepareEchoMatchRequest
     [JsonPropertyName("id")]
     public required string Id { get; set; }
 
+    [JsonPropertyName("guild_id")]
+    public required string GuildId { get; set; }
+
+    [JsonPropertyName("owner_id")]
+    public required string OwnerId { get; set; }
+
     [JsonPropertyName("mode")]
     public required string Mode { get; set; }
 
-    [JsonPropertyName("spawned_by")]
-    public required string SpawnedBy { get; set; }
+    [JsonPropertyName("level")]
+    public string? Level { get; set; }
 
-    [JsonPropertyName("role_alignments")]
-    public Dictionary<string, int> RoleAlignments { get; set; } = new();
+    [JsonPropertyName("region")]
+    public string? Region { get; set; }
 
-    [JsonPropertyName("guild_id")]
-    public required string GuildId { get; set; }
+    [JsonPropertyName("team_alignments")]
+    public Dictionary<string, string> TeamAlignments { get; set; } = new();
 }

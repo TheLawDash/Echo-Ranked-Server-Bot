@@ -79,43 +79,109 @@ public class DiscordBotService(
         return Task.CompletedTask;
     }
 
-    private async Task OnMessageReceivedAsync(SocketMessage message)
+    private Task OnMessageReceivedAsync(SocketMessage message)
     {
-        var handler = services.GetRequiredService<MessageReceivedHandler>();
-        await handler.HandleMessageReceivedAsync(message);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var handler = services.GetRequiredService<MessageReceivedHandler>();
+                await handler.HandleMessageReceivedAsync(message);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in MessageReceived handler");
+            }
+        });
+        return Task.CompletedTask;
     }
 
-    private async Task OnChannelCreatedAsync(SocketChannel channel)
+    private Task OnChannelCreatedAsync(SocketChannel channel)
     {
-        var handler = services.GetRequiredService<ChannelCreatedHandler>();
-        await handler.HandleChannelCreatedAsync(channel);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var handler = services.GetRequiredService<ChannelCreatedHandler>();
+                await handler.HandleChannelCreatedAsync(channel);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ChannelCreated handler");
+            }
+        });
+        return Task.CompletedTask;
     }
 
-    private async Task OnChannelDestroyedAsync(SocketChannel channel)
+    private Task OnChannelDestroyedAsync(SocketChannel channel)
     {
-        var handler = services.GetRequiredService<ChannelDestroyedHandler>();
-        await handler.HandleChannelDestroyedAsync(channel);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var handler = services.GetRequiredService<ChannelDestroyedHandler>();
+                await handler.HandleChannelDestroyedAsync(channel);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in ChannelDestroyed handler");
+            }
+        });
+        return Task.CompletedTask;
     }
 
-    private async Task OnGuildMemberUpdatedAsync(Cacheable<SocketGuildUser, ulong> before, SocketGuildUser after)
+    private Task OnGuildMemberUpdatedAsync(Cacheable<SocketGuildUser, ulong> before, SocketGuildUser after)
     {
-        var handler = services.GetRequiredService<GuildMemberUpdatedHandler>();
-        await handler.HandleGuildMemberUpdatedAsync(before, after);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var handler = services.GetRequiredService<GuildMemberUpdatedHandler>();
+                await handler.HandleGuildMemberUpdatedAsync(before, after);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in GuildMemberUpdated handler");
+            }
+        });
+        return Task.CompletedTask;
     }
 
-    private async Task OnSelectMenuExecutedAsync(SocketMessageComponent component)
+    private Task OnSelectMenuExecutedAsync(SocketMessageComponent component)
     {
-        var handler = services.GetRequiredService<SelectMenuHandler>();
-        await handler.HandleSelectMenuExecutedAsync(component);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var handler = services.GetRequiredService<SelectMenuHandler>();
+                await handler.HandleSelectMenuExecutedAsync(component);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in SelectMenuExecuted handler");
+            }
+        });
+        return Task.CompletedTask;
     }
 
-    private async Task OnInteractionCreatedAsync(SocketInteraction interaction)
+    private Task OnInteractionCreatedAsync(SocketInteraction interaction)
     {
-        logger.LogInformation("Interaction received: Type={Type}, Id={Id}", interaction.Type, interaction.Id);
-        var ctx = new SocketInteractionContext(client, interaction);
-        var result = await interactions.ExecuteCommandAsync(ctx, services);
-        if (!result.IsSuccess)
-            logger.LogError("Interaction failed: {Error} ({ErrorReason})", result.Error, result.ErrorReason);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                logger.LogInformation("Interaction received: Type={Type}, Id={Id}", interaction.Type, interaction.Id);
+                var ctx = new SocketInteractionContext(client, interaction);
+                var result = await interactions.ExecuteCommandAsync(ctx, services);
+                if (!result.IsSuccess)
+                    logger.LogError("Interaction failed: {Error} ({ErrorReason})", result.Error, result.ErrorReason);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error in InteractionCreated handler");
+            }
+        });
+        return Task.CompletedTask;
     }
 
     private Task LogAsync(LogMessage msg)
