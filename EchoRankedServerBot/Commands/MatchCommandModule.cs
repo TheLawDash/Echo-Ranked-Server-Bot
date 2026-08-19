@@ -275,12 +275,12 @@ public class MatchCommandModule(
         var menuBuilder = new SelectMenuBuilder()
             .WithCustomId("test_server_select")
             .WithPlaceholder("Select a server...")
-            .AddOption("Chicago", "chicago", "redacted-region")
-            .AddOption("Dallas", "dallas", "redacted-region")
+            .AddOption("Chicago", "chicago", options.Value.ChicagoRegionCode)
+            .AddOption("Dallas", "dallas", options.Value.DallasRegionCode)
             .AddOption("EU", "eu", "EU 180hz")
-            .AddOption("Nebraska", "nebraska", "0.0.0.0")
-            .AddOption("Pennsylvania", "pennsylvania", "0.0.0.0")
-            .AddOption("Kansas", "kansas", "0.0.0.0");
+            .AddOption("Nebraska", "nebraska", options.Value.NebraskaServerIp)
+            .AddOption("Pennsylvania", "pennsylvania", options.Value.PennsylvaniaServerIp)
+            .AddOption("Kansas", "kansas", options.Value.KansasServerIp);
 
         var component = new ComponentBuilder().WithSelectMenu(menuBuilder).Build();
         await RespondAsync("Choose a server:", components: component, ephemeral: true);

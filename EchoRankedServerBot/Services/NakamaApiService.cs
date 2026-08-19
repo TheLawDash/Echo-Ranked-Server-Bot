@@ -214,18 +214,18 @@ public class NakamaApiService(
         // Define prioritized search conditions
         var searchConditions = new List<Func<MatchLabel, bool>>
         {
-            x => x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned"),
-            x => containEu && x.Broadcaster.Tags.Contains("180hz") && x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.ChicagoRegionCode) && x.LobbyType.Contains("unassigned"),
+            x => containEu && x.Broadcaster.Tags.Contains("180hz") && x.Broadcaster.RegionCodes.Contains(botOptions.Value.ChicagoRegionCode) && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.RankedCompRegionCode) && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.DallasRegionCode) && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.OmahaRegionCode) && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.PgvDcCevrRegionCode) && x.LobbyType.Contains("unassigned"),
             x => x.Broadcaster.RegionCodes.Contains("180hz") && x.Broadcaster.Tags.Contains("ranked-central") && x.LobbyType.Contains("unassigned"),
             x => x.Broadcaster.RegionCodes.Contains("comp") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.Endpoint.Contains("0.0.0.0") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.Endpoint.Contains("0.0.0.0") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.Endpoint.Contains("0.0.0.0") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.Endpoint.Contains("0.0.0.0") && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.Endpoint.Contains(botOptions.Value.NebraskaServerIp) && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.Endpoint.Contains(botOptions.Value.FallbackServerIp) && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.Endpoint.Contains(botOptions.Value.PennsylvaniaServerIp) && x.LobbyType.Contains("unassigned"),
+            x => x.Broadcaster.Endpoint.Contains(botOptions.Value.KansasServerIp) && x.LobbyType.Contains("unassigned"),
             x => x.LobbyType.Contains("unassigned")
         };
 

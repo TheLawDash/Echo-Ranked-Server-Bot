@@ -1,12 +1,15 @@
 using Discord;
 using Discord.WebSocket;
+using EchoRankedServerBot.Configuration;
 using EchoRankedServerBot.Services;
+using Microsoft.Extensions.Options;
 
 namespace EchoRankedServerBot.Handlers;
 
 public class SelectMenuHandler(
     NakamaApiService nakamaApi,
-    MatchLifecycleService lifecycle)
+    MatchLifecycleService lifecycle,
+    IOptions<BotOptions> options)
 {
     public async Task HandleSelectMenuExecutedAsync(SocketMessageComponent component)
     {
@@ -35,17 +38,17 @@ public class SelectMenuHandler(
         var selectedMatch = selectedValue switch
         {
             "chicago" => matches.Labels.FirstOrDefault(x =>
-                x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned")),
+                x.Broadcaster.RegionCodes.Contains(options.Value.ChicagoRegionCode) && x.LobbyType.Contains("unassigned")),
             "dallas" => matches.Labels.FirstOrDefault(x =>
-                x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned")),
+                x.Broadcaster.RegionCodes.Contains(options.Value.DallasRegionCode) && x.LobbyType.Contains("unassigned")),
             "eu" => matches.Labels.FirstOrDefault(x =>
-                x.Broadcaster.Tags.Contains("180hz") && x.Broadcaster.RegionCodes.Contains("redacted-region") && x.LobbyType.Contains("unassigned")),
+                x.Broadcaster.Tags.Contains("180hz") && x.Broadcaster.RegionCodes.Contains(options.Value.ChicagoRegionCode) && x.LobbyType.Contains("unassigned")),
             "nebraska" => matches.Labels.FirstOrDefault(x =>
-                x.Broadcaster.Endpoint.Contains("0.0.0.0") && x.LobbyType.Contains("unassigned")),
+                x.Broadcaster.Endpoint.Contains(options.Value.NebraskaServerIp) && x.LobbyType.Contains("unassigned")),
             "pennsylvania" => matches.Labels.FirstOrDefault(x =>
-                x.Broadcaster.Endpoint.Contains("0.0.0.0") && x.LobbyType.Contains("unassigned")),
+                x.Broadcaster.Endpoint.Contains(options.Value.PennsylvaniaServerIp) && x.LobbyType.Contains("unassigned")),
             "kansas" => matches.Labels.FirstOrDefault(x =>
-                x.Broadcaster.Endpoint.Contains("0.0.0.0") && x.LobbyType.Contains("unassigned")),
+                x.Broadcaster.Endpoint.Contains(options.Value.KansasServerIp) && x.LobbyType.Contains("unassigned")),
             _ => null
         };
 

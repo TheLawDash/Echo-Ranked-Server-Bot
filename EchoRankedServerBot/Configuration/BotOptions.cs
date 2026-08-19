@@ -18,4 +18,13 @@ public class BotOptions
     public string PrimaryGuildId { get; set; } = string.Empty;
     public string BackupGuildId { get; set; } = string.Empty;
     public string SpawnedBy { get; set; } = string.Empty;
+    public string NebraskaServerIp { get; set; } = string.Empty;
+    public string PennsylvaniaServerIp { get; set; } = string.Empty;
+    public string KansasServerIp { get; set; } = string.Empty;
+    public string FallbackServerIp { get; set; } = string.Empty;
+    public string ChicagoRegionCode { get; set; } = string.Empty;
+    public string DallasRegionCode { get; set; } = string.Empty;
+    public string RankedCompRegionCode { get; set; } = string.Empty;
+    public string OmahaRegionCode { get; set; } = string.Empty;
+    public string PgvDcCevrRegionCode { get; set; } = string.Empty;
 }
