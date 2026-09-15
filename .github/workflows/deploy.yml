@@ -90,41 +90,76 @@ jobs:
           kubectl --context "$KUBE_CONTEXT" cluster-info
           helm version
           kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" get secret ghcr-credentials
-          kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" get secret echo-ranked-server-bot-secrets
           [[ "$BOT_REPLICA_COUNT" =~ ^[01]$ ]]
 
-      - name: Validate Kubernetes application credentials
+      - name: Sync application credentials to Kubernetes
         shell: bash
+        env:
+          ECHO_RANKED_DISCORD_TOKEN: ${{ secrets.ECHO_RANKED_DISCORD_TOKEN }}
+          ECHO_RANKED_NAKAMA_HTTP_KEY: ${{ secrets.ECHO_RANKED_NAKAMA_HTTP_KEY }}
+          ECHO_RANKED_NAKAMA_PASSWORD: ${{ secrets.ECHO_RANKED_NAKAMA_PASSWORD }}
+          ECHO_RANKED_NAKAMA_USERNAME: ${{ secrets.ECHO_RANKED_NAKAMA_USERNAME }}
+          ECHO_RANKED_NEAT_QUEUE_API_KEY: ${{ secrets.ECHO_RANKED_NEAT_QUEUE_API_KEY }}
+          ECHO_RANKED_POSTGRES_CONNECTION: ${{ secrets.ECHO_RANKED_POSTGRES_CONNECTION }}
+          LOGGING_LEVEL_DEFAULT: ${{ secrets.LOGGING_LEVEL_DEFAULT }}
+          LOGGING_LEVEL_EF_CORE: ${{ secrets.LOGGING_LEVEL_EF_CORE }}
+          NAKAMA_MATCH_DATA_SOURCE: ${{ secrets.NAKAMA_MATCH_DATA_SOURCE }}
+          NAKAMA_MATCH_DETAIL_ENDPOINT: ${{ secrets.NAKAMA_MATCH_DETAIL_ENDPOINT }}
+          NAKAMA_PLAYER_STATISTICS_ENDPOINT: ${{ secrets.NAKAMA_PLAYER_STATISTICS_ENDPOINT }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
         run: |
           set -euo pipefail
-          kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" get secret echo-ranked-server-bot-secrets -o json | python3 -c '
+          export APPSETTINGS_JSON_BASE64="$(
+            kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" \
+              get secret echo-ranked-server-bot-secrets \
+              -o jsonpath='{.data.appsettings\.json}'
+          )"
+          test -n "$APPSETTINGS_JSON_BASE64"
+          python3 - <<'PY' | kubectl --context "$KUBE_CONTEXT" apply -f -
           import base64
           import json
+          import os
           import sys
-          secret = json.load(sys.stdin).get("data", {})
-          required = {
-              "EchoRankedDiscordToken",
-              "EchoRankedNakamaHttpKey",
-              "EchoRankedNakamaPassword",
-              "EchoRankedNakamaUsername",
-              "EchoRankedNeatQueueApiKey",
-              "EchoRankedPostgresConnection",
-              "Logging__LogLevel__Default",
-              "Logging__LogLevel__Microsoft.EntityFrameworkCore",
-              "Nakama__MatchDataSource",
-              "Nakama__MatchDetailEndpoint",
-              "Nakama__PlayerStatisticsEndpoint",
-              "POSTGRES_USER",
-              "POSTGRES_PASSWORD",
-              "POSTGRES_DB",
-              "appsettings.json",
+
+          mapping = {
+              "EchoRankedDiscordToken": "ECHO_RANKED_DISCORD_TOKEN",
+              "EchoRankedNakamaHttpKey": "ECHO_RANKED_NAKAMA_HTTP_KEY",
+              "EchoRankedNakamaPassword": "ECHO_RANKED_NAKAMA_PASSWORD",
+              "EchoRankedNakamaUsername": "ECHO_RANKED_NAKAMA_USERNAME",
+              "EchoRankedNeatQueueApiKey": "ECHO_RANKED_NEAT_QUEUE_API_KEY",
+              "EchoRankedPostgresConnection": "ECHO_RANKED_POSTGRES_CONNECTION",
+              "Logging__LogLevel__Default": "LOGGING_LEVEL_DEFAULT",
+              "Logging__LogLevel__Microsoft.EntityFrameworkCore": "LOGGING_LEVEL_EF_CORE",
+              "Nakama__MatchDataSource": "NAKAMA_MATCH_DATA_SOURCE",
+              "Nakama__MatchDetailEndpoint": "NAKAMA_MATCH_DETAIL_ENDPOINT",
+              "Nakama__PlayerStatisticsEndpoint": "NAKAMA_PLAYER_STATISTICS_ENDPOINT",
           }
-          if set(secret) != required:
-              raise SystemExit("The Kubernetes secret key set is invalid.")
-          if not all(base64.b64decode(secret[name]) for name in required):
-              raise SystemExit("A required Kubernetes secret value is empty.")
-          print("SECRET_CONFIGURATION_OK")
-          '
+          string_data = {key: os.environ[source] for key, source in mapping.items()}
+          string_data.update({
+              "POSTGRES_USER": os.environ["POSTGRES_USER"],
+              "POSTGRES_PASSWORD": os.environ["POSTGRES_PASSWORD"],
+              "POSTGRES_DB": os.environ["POSTGRES_DB"],
+              "appsettings.json": base64.b64decode(
+                  os.environ["APPSETTINGS_JSON_BASE64"]
+              ).decode("utf-8"),
+          })
+          if not all(string_data.values()):
+              raise SystemExit("A required deployment secret is empty.")
+          json.loads(string_data["appsettings.json"])
+          print(json.dumps({
+              "apiVersion": "v1",
+              "kind": "Secret",
+              "metadata": {
+                  "name": "echo-ranked-server-bot-secrets",
+                  "namespace": os.environ["NAMESPACE"],
+                  "labels": {"app.kubernetes.io/part-of": "law-general-bots"},
+              },
+              "type": "Opaque",
+              "stringData": string_data,
+          }))
+          PY
 
       - name: Deploy Helm release
         shell: bash

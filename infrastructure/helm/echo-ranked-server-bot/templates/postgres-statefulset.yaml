@@ -22,7 +22,7 @@ spec:
     spec:
       automountServiceAccountToken: false
       securityContext:
-        fsGroup: 999
+        fsGroup: 70
         fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: postgres
@@ -72,8 +72,6 @@ spec:
             failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
       volumes:

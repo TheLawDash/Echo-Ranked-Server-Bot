@@ -1,9 +1,14 @@
 using EchoRankedServerBot.Extensions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-ConfigurationExtensions.Initialize(builder.Configuration);
+#if DEBUG
+builder.Configuration.AddUserSecrets(typeof(Program).Assembly, optional: true);
+#endif
+
+EchoRankedServerBot.Extensions.ConfigurationExtensions.Initialize(builder.Configuration);
 
 builder.Services.AddEchoRankedBot(builder.Configuration);
 
