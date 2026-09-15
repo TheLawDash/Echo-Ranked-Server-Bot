@@ -107,8 +107,9 @@ public class MatchCommandModule(
             var liveEmbed = new EmbedBuilder()
                 .WithColor(Color.Green)
                 .WithTitle($"Match for: {textChannel.Name}")
+                .AddField("Last updated at:", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:R>")
                 .WithImageUrl("attachment://original.png")
-                .WithFooter($"Updated at {DateTime.Now:hh:mm tt}");
+                .WithFooter("Echo Ranked • Server Manager");
 
             if (liveMessageId != null)
             {
@@ -240,8 +241,9 @@ public class MatchCommandModule(
             var embedBuilder = new EmbedBuilder()
                 .WithColor(Color.Green)
                 .WithTitle($"Match for: {textChannel.Name}")
+                .AddField("Last updated at:", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:R>")
                 .WithImageUrl("attachment://original.png")
-                .WithFooter($"Updated at {DateTime.Now:hh:mm tt}");
+                .WithFooter("Echo Ranked • Server Manager");
             var liveMsg = await liveChannel.SendFileAsync(fileStream, "original.png", embed: embedBuilder.Build());
             liveMessageId = liveMsg.Id;
         }

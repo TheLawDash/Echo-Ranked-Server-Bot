@@ -179,8 +179,9 @@ public class MatchMonitorCoordinator(
             var embedBuilder = new EmbedBuilder()
                 .WithColor(Color.Green)
                 .WithTitle($"Match for: {queueName}")
+                .AddField("Last updated at:", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:R>")
                 .WithImageUrl($"attachment://{matchId}.png")
-                .WithFooter($"Updated at {DateTime.Now:hh:mm tt}");
+                .WithFooter("Echo Ranked • Server Manager");
 
             var existingMsg = await liveChannel.GetMessageAsync(rankedMatch.PrivateMatchDetails.LiveMatchMessageId.Value) as IUserMessage;
             if (existingMsg != null)
