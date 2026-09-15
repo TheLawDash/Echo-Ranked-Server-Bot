@@ -8,7 +8,6 @@ namespace EchoRankedServerBot.Handlers;
 
 public partial class GuildMemberUpdatedHandler(
     BotConfigService config,
-    DiscordChannelService discord,
     ILogger<GuildMemberUpdatedHandler> logger)
 {
     public async Task HandleGuildMemberUpdatedAsync(Cacheable<SocketGuildUser, ulong> before, SocketGuildUser after)
@@ -16,26 +15,42 @@ public partial class GuildMemberUpdatedHandler(
         try
         {
             if (!config.IsEnforce1000MmrPartyRestrictionEnabled())
+            {
+                logger.LogDebug("Ignoring nickname update for {User} because the 1000 MMR party restriction is disabled", after.Username);
                 return;
+            }
 
             var beforeUser = before.HasValue ? before.Value : null;
             if (beforeUser == null)
+            {
+                logger.LogDebug("Ignoring nickname update for {User} because the cached previous state was not available", after.Username);
                 return;
+            }
 
             if (beforeUser.Nickname == after.Nickname)
+            {
+                logger.LogDebug("Ignoring update for {User} because the nickname did not change", after.Username);
                 return;
+            }
 
             var oldMmr = ExtractMmrFromNickname(beforeUser.Nickname);
             var newMmr = ExtractMmrFromNickname(after.Nickname);
 
-            if (oldMmr.HasValue && newMmr.HasValue && oldMmr < 1000 && newMmr >= 1000)
+            if (!oldMmr.HasValue || !newMmr.HasValue)
             {
+                logger.LogDebug("Ignoring nickname update for {User} because an MMR value could not be parsed from old nickname {OldNickname} or new nickname {NewNickname}", after.Username, beforeUser.Nickname, after.Nickname);
+                return;
+            }
+
+            if (oldMmr < 1000 && newMmr >= 1000)
+            {
+                logger.LogInformation("User {User} crossed the 1000 MMR threshold, sending party restriction warning", after.Username);
                 await SendMmrPartyRestrictionWarningAsync(after);
             }
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error processing nickname change for {User}", after.Username);
+            logger.LogError(ex, "Error processing nickname change for {User} ({UserId})", after.Username, after.Id);
         }
     }
 
@@ -83,11 +98,11 @@ public partial class GuildMemberUpdatedHandler(
             var dmChannel = await member.CreateDMChannelAsync();
             await dmChannel.SendMessageAsync(embed: embed);
 
-            await discord.LogInfoAsync($"Sent 1000+ MMR party restriction warning to **{member.Username}** ({member.Mention})");
+            logger.LogInformation("Sent the 1000 MMR party restriction warning to {User} ({UserId})", member.Username, member.Id);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to send MMR restriction warning to {User}", member.Username);
+            logger.LogWarning(ex, "Failed to send the 1000 MMR party restriction warning to {User} ({UserId})", member.Username, member.Id);
         }
     }
 

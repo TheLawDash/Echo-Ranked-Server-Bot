@@ -1,9 +1,10 @@
 using System.Collections.Concurrent;
 using EchoRankedServerBot.Models.Match;
+using Microsoft.Extensions.Logging;
 
 namespace EchoRankedServerBot.Services;
 
-public class MatchStateService
+public class MatchStateService(ILogger<MatchStateService> logger)
 {
     private readonly ConcurrentDictionary<string, EchoMatch> _matches = new();
 
@@ -24,7 +25,10 @@ public class MatchStateService
     public void UpdateMatch(string matchId, Action<EchoMatch> action)
     {
         if (!_matches.TryGetValue(matchId, out var match))
+        {
+            logger.LogWarning("UpdateMatch: No match found with ID {MatchId}, update was not applied", matchId);
             return;
+        }
 
         lock (match.Lock)
         {

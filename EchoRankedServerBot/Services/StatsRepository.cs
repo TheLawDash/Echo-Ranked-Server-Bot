@@ -48,8 +48,17 @@ public class StatsRepository(IServiceScopeFactory scopeFactory, ILogger<StatsRep
             ShotSpeeds = stats.ShotSpeed
         };
 
-        db.PlayerMatchStats.Add(entity);
-        await db.SaveChangesAsync();
-        logger.LogInformation("Stats saved for {PlayerName} in {MatchName}", stats.PlayerName, stats.PrivateName);
+        try
+        {
+            db.PlayerMatchStats.Add(entity);
+            await db.SaveChangesAsync();
+            logger.LogInformation("Stats saved for {PlayerName} in {MatchName}", stats.PlayerName, stats.PrivateName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Could not save match stats for {PlayerName} ({DiscordId}) in match {MatchName}, so the stats were not recorded.",
+                stats.PlayerName, stats.DiscordId, stats.PrivateName);
+        }
     }
 }

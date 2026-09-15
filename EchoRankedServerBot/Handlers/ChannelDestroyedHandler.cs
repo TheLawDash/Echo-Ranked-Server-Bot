@@ -7,23 +7,36 @@ namespace EchoRankedServerBot.Handlers;
 public class ChannelDestroyedHandler(
     MatchStateService matchState,
     MatchLifecycleService lifecycle,
-    DiscordChannelService discord,
     ILogger<ChannelDestroyedHandler> logger)
 {
     public async Task HandleChannelDestroyedAsync(SocketChannel channel)
     {
         if (channel is not SocketTextChannel textChannel)
+        {
+            logger.LogDebug("Ignoring destroyed channel {ChannelId} because it is not a text channel", channel.Id);
             return;
+        }
 
         try
         {
             var rankedMatch = matchState.GetByChannelId(textChannel.Id);
             if (rankedMatch == null)
+            {
+                logger.LogDebug("Ignoring destroyed channel {ChannelId} ({ChannelName}) because it is not a tracked queue channel", textChannel.Id, textChannel.Name);
                 return;
+            }
 
             if (rankedMatch.EchoMatchInstance == null)
             {
-                matchState.TryRemove(rankedMatch.MatchId, out _);
+                if (!matchState.TryRemove(rankedMatch.MatchId, out _))
+                {
+                    logger.LogWarning("Could not remove match state {MatchId} for destroyed channel {ChannelId} ({ChannelName})", rankedMatch.MatchId, textChannel.Id, textChannel.Name);
+                }
+                else
+                {
+                    logger.LogInformation("Queue channel {ChannelName} deleted before a match started, match {MatchId} removed", textChannel.Name, rankedMatch.MatchId);
+                }
+
                 return;
             }
 
@@ -33,7 +46,6 @@ public class ChannelDestroyedHandler(
         catch (Exception ex)
         {
             logger.LogError(ex, "Error handling channel deletion for {ChannelId}", textChannel.Id);
-            await discord.LogErrorAsync($"Error handling channel deletion: {ex.Message}");
         }
     }
 }

@@ -26,12 +26,23 @@ public class BotConfigService(ILogger<BotConfigService> logger, IConfiguration c
                 if (File.Exists(_configPath))
                 {
                     var json = File.ReadAllText(_configPath);
-                    _cachedConfig = JsonSerializer.Deserialize<BotConfig>(json) ?? new BotConfig();
+                    var deserialized = JsonSerializer.Deserialize<BotConfig>(json);
+                    if (deserialized is null)
+                    {
+                        logger.LogWarning(
+                            "The bot config file at {ConfigPath} was empty or invalid, so default settings were used.",
+                            _configPath);
+                    }
+
+                    _cachedConfig = deserialized ?? new BotConfig();
                 }
                 else
                 {
                     _cachedConfig = new BotConfig();
                     SaveConfigInternal(_cachedConfig);
+                    logger.LogInformation(
+                        "No bot config file was found, so a default config file was created at {ConfigPath}.",
+                        _configPath);
                 }
 
                 return _cachedConfig;
@@ -54,6 +65,8 @@ public class BotConfigService(ILogger<BotConfigService> logger, IConfiguration c
             var config = GetConfigInternal();
             config.Enforce1000MmrPartyRestriction = enabled;
             SaveConfigInternal(config);
+            logger.LogInformation("Setting {SettingName} changed to {SettingValue}",
+                nameof(BotConfig.Enforce1000MmrPartyRestriction), enabled);
         }
     }
 
@@ -84,7 +97,7 @@ public class BotConfigService(ILogger<BotConfigService> logger, IConfiguration c
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to save bot config to {ConfigPath}", _configPath);
+            logger.LogError(ex, "Could not save the bot config to {ConfigPath}, so the change may not persist across restarts.", _configPath);
         }
     }
 }

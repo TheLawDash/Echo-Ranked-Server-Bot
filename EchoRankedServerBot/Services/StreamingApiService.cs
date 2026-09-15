@@ -53,7 +53,21 @@ public class StreamingApiService(
     /// </summary>
     private async Task<SessionData?> GetLatestSessionDataAsync(string matchId, TokenResponse token)
     {
+        if (string.IsNullOrWhiteSpace(nakamaOptions.Value.BaseUrl))
+        {
+            logger.LogError("Required configuration value {SettingName} is missing or empty.", "Nakama:BaseUrl");
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(nakamaOptions.Value.StreamingEndpoint))
+        {
+            logger.LogError("Required configuration value {SettingName} is missing or empty.", "Nakama:StreamingEndpoint");
+            return null;
+        }
+
         var streamingUrl = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.StreamingEndpoint}";
+
+        logger.LogDebug("Requesting streaming API session data for match {MatchId}", matchId);
 
         try
         {
@@ -76,24 +90,37 @@ public class StreamingApiService(
 
                     if (latestFrame?.Session is not null)
                         return latestFrame.Session;
+
+                    logger.LogWarning(
+                        "Streaming API response for match {MatchId} did not contain session data in the latest frame", matchId);
+                    return null;
                 }
 
+                logger.LogWarning("Streaming API response for match {MatchId} contained no events", matchId);
                 return null;
             }
 
-            var truncatedResponse = responseContent.Length > 500
-                ? responseContent[..500] + "..."
-                : responseContent;
+            var truncatedResponse = Truncate(responseContent);
 
             logger.LogError(
-                "Failed to fetch streaming API session. MatchId: {MatchId}, StatusCode: {StatusCode}, Response: {Response}",
-                matchId, response.StatusCode, truncatedResponse);
+                "Streaming API returned status {StatusCode} for match {MatchId}, so no session data could be retrieved. Response: {Response}",
+                response.StatusCode, matchId, truncatedResponse);
 
             return null;
         }
-        catch (TaskCanceledException)
+        catch (HttpRequestException ex)
         {
-            logger.LogWarning("Streaming API request timed out for match {MatchId}", matchId);
+            logger.LogError(ex, "HttpRequestException fetching streaming API session for match {MatchId}", matchId);
+            return null;
+        }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogWarning(ex, "Streaming API request timed out for match {MatchId}", matchId);
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse streaming API session response for match {MatchId}", matchId);
             return null;
         }
         catch (Exception ex)
@@ -104,11 +131,37 @@ public class StreamingApiService(
     }
 
     /// <summary>
+    /// Truncates a response body to the first 500 characters for safe logging.
+    /// </summary>
+    private static string Truncate(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return string.Empty;
+
+        var trimmed = content.Trim();
+        return trimmed.Length > 500 ? trimmed[..500] : trimmed;
+    }
+
+    /// <summary>
     /// Checks if the match has ended by looking for a matchEnded event in the frames.
     /// </summary>
     public async Task<bool> HasMatchEndedAsync(string matchId, TokenResponse token)
     {
+        if (string.IsNullOrWhiteSpace(nakamaOptions.Value.BaseUrl))
+        {
+            logger.LogError("Required configuration value {SettingName} is missing or empty.", "Nakama:BaseUrl");
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(nakamaOptions.Value.StreamingEndpoint))
+        {
+            logger.LogError("Required configuration value {SettingName} is missing or empty.", "Nakama:StreamingEndpoint");
+            return false;
+        }
+
         var streamingUrl = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.StreamingEndpoint}";
+
+        logger.LogDebug("Checking whether match {MatchId} has ended", matchId);
 
         try
         {
@@ -121,7 +174,14 @@ public class StreamingApiService(
             var response = await client.PostAsync(streamingUrl, content);
             var responseContent = await response.Content.ReadAsStringAsync();
 
-            if (!response.IsSuccessStatusCode) return false;
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogError(
+                    "Streaming API returned status {StatusCode} while checking match end for {MatchId}, so match end status is assumed false. Response: {Response}",
+                    response.StatusCode, matchId, Truncate(responseContent));
+                return false;
+            }
+
             var streamingResponse = JsonSerializer.Deserialize<LobbySessionEventsResponse>(responseContent);
 
             if (streamingResponse?.Events is not null)
@@ -131,6 +191,22 @@ public class StreamingApiService(
                     e.Frame.Events.Any(evt => evt.IsMatchEnded));
             }
 
+            logger.LogWarning("Streaming API response for match {MatchId} contained no events when checking match end status", matchId);
+            return false;
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "HttpRequestException while checking if match ended for {MatchId}", matchId);
+            return false;
+        }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogWarning(ex, "Request timed out while checking if match ended for {MatchId}", matchId);
+            return false;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse streaming API response while checking if match ended for {MatchId}", matchId);
             return false;
         }
         catch (Exception ex)
@@ -146,6 +222,11 @@ public class StreamingApiService(
     public async Task<EchoVrApiSession?> GetEchoApiFromStreamingAsync(string matchId, TokenResponse token)
     {
         var sessionData = await GetLatestSessionDataAsync(matchId, token);
-        return ConvertToEchoVrApiSession(sessionData);
+        var session = ConvertToEchoVrApiSession(sessionData);
+
+        if (session is null)
+            logger.LogWarning("No Echo VR session could be built from streaming data for match {MatchId}", matchId);
+
+        return session;
     }
 }

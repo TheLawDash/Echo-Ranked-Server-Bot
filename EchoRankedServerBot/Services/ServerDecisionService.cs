@@ -27,8 +27,23 @@ public class ServerDecisionService(
         List<TeamOrientation>? players,
         TokenResponse token)
     {
-        if (players is null || players.Count == 0 || matches.Labels.Count == 0)
+        if (players is null || players.Count == 0)
+        {
+            logger.LogWarning(
+                "No server decision could be made because no players were provided. PlayerCount: {PlayerCount}",
+                players?.Count ?? 0);
             return null;
+        }
+
+        if (matches.Labels.Count == 0)
+        {
+            logger.LogWarning(
+                "No server decision could be made because no candidate matches were available. PlayerCount: {PlayerCount}",
+                players.Count);
+            return null;
+        }
+
+        logger.LogDebug("Deciding best server among {MatchCount} matches for {PlayerCount} players", matches.Labels.Count, players.Count);
 
         var playerLatencyTasks = players
             .Where(p => !string.IsNullOrWhiteSpace(p.NakamaId))
@@ -45,7 +60,12 @@ public class ServerDecisionService(
                 r => r.latency!);
 
         if (playerLatencies.Count == 0)
+        {
+            logger.LogWarning(
+                "No server decision could be made because no players had usable latency data out of {PlayerCount} players considered",
+                players.Count);
             return null;
+        }
 
         var candidateMatches = matches.Labels
             .Where(m => m.LobbyType.Contains("unassigned", StringComparison.OrdinalIgnoreCase))
@@ -57,7 +77,12 @@ public class ServerDecisionService(
         {
             var endpointParts = match.Broadcaster.Endpoint.Split(':');
             if (endpointParts.Length < 2)
+            {
+                logger.LogWarning(
+                    "Skipping match {MatchId} because its endpoint {Endpoint} was not in the expected ip:port format",
+                    match.Id, match.Broadcaster.Endpoint);
                 continue;
+            }
 
             var serverIp = endpointParts[1];
             var latencies = new List<double>();
@@ -84,7 +109,15 @@ public class ServerDecisionService(
         }
 
         if (candidates.Count == 0)
+        {
+            var consideredIps = candidateMatches
+                .Select(m => m.Broadcaster.Endpoint)
+                .ToList();
+            logger.LogWarning(
+                "No server decision could be made because none of the {MatchCount} candidate matches had latency data for the given players. Endpoints considered: {Endpoints}",
+                candidateMatches.Count, string.Join(", ", consideredIps));
             return null;
+        }
 
         var bestServer = candidates
             .OrderByDescending(c => c.PlayersWithData)

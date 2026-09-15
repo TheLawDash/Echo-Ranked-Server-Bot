@@ -24,29 +24,60 @@ public class NeatQueueService(
             user_id = memberId.ToString()
         };
 
+        const string endpoint = "https://api.neatqueue.com/api/v2/add/mmr";
         var jsonString = JsonSerializer.Serialize(payload);
 
         for (var attempt = 1; attempt <= MaxRetries; attempt++)
         {
+            logger.LogDebug(
+                "Posting MVP reward attempt {Attempt}/{MaxRetries} for member {MemberId} in channel {ChannelId}",
+                attempt, MaxRetries, memberId, channelId);
+
             try
             {
                 using var client = factory.CreateClient("NeatQueue");
 
                 var content = new StringContent(jsonString, Encoding.UTF8, "application/json");
-                var response = await client.PostAsync("https://api.neatqueue.com/api/v2/add/mmr", content);
+                var response = await client.PostAsync(endpoint, content);
                 var responseContent = await response.Content.ReadAsStringAsync();
 
-                if (responseContent.Contains("MMR"))
+                if (!response.IsSuccessStatusCode)
+                {
+                    logger.LogWarning(
+                        "NeatQueue returned status {StatusCode} on attempt {Attempt}/{MaxRetries} for member {MemberId}. Response: {Response}",
+                        response.StatusCode, attempt, MaxRetries, memberId, Truncate(responseContent));
+                }
+                else if (responseContent.Contains("MMR"))
                 {
                     logger.LogInformation(
                         "MVP reward posted successfully for member {MemberId} in channel {ChannelId}. Response: {Response}",
                         memberId, channelId, responseContent);
                     return true;
                 }
-
-                logger.LogWarning(
-                    "MVP reward attempt {Attempt}/{MaxRetries} failed for member {MemberId}. Response: {Response}",
-                    attempt, MaxRetries, memberId, responseContent);
+                else
+                {
+                    logger.LogWarning(
+                        "MVP reward attempt {Attempt}/{MaxRetries} failed for member {MemberId}. Response: {Response}",
+                        attempt, MaxRetries, memberId, Truncate(responseContent));
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                logger.LogError(ex,
+                    "HttpRequestException on MVP reward attempt {Attempt}/{MaxRetries} for member {MemberId} at endpoint {Endpoint}",
+                    attempt, MaxRetries, memberId, endpoint);
+            }
+            catch (TaskCanceledException ex)
+            {
+                logger.LogError(ex,
+                    "MVP reward attempt {Attempt}/{MaxRetries} timed out for member {MemberId} at endpoint {Endpoint}",
+                    attempt, MaxRetries, memberId, endpoint);
+            }
+            catch (JsonException ex)
+            {
+                logger.LogError(ex,
+                    "Failed to serialize or parse data on MVP reward attempt {Attempt}/{MaxRetries} for member {MemberId}",
+                    attempt, MaxRetries, memberId);
             }
             catch (Exception ex)
             {
@@ -65,5 +96,17 @@ public class NeatQueueService(
             "All {MaxRetries} MVP reward attempts exhausted for member {MemberId} in channel {ChannelId}",
             MaxRetries, memberId, channelId);
         return false;
+    }
+
+    /// <summary>
+    /// Truncates a response body to the first 500 characters for safe logging.
+    /// </summary>
+    private static string Truncate(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return string.Empty;
+
+        var trimmed = content.Trim();
+        return trimmed.Length > 500 ? trimmed[..500] : trimmed;
     }
 }

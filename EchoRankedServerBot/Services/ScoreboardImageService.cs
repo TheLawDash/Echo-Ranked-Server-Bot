@@ -40,16 +40,42 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
                 return null;
             }
 
+            if (playerScores.Count == 0)
+            {
+                logger.LogWarning(
+                    "No player scores were available for match {MatchId} when generating the scoreboard. MVP score and MVP name will be blank.",
+                    matchId);
+            }
+
+            if (!File.Exists(templatePath))
+            {
+                logger.LogError(
+                    "Could not generate the scoreboard for match {MatchId} because the template file at {TemplatePath} was not found.",
+                    matchId, templatePath);
+                return null;
+            }
+
             using var bitmap = SKBitmap.Decode(templatePath);
             if (bitmap is null)
             {
-                logger.LogError("Failed to decode template image at {TemplatePath}", templatePath);
+                logger.LogError(
+                    "Could not generate the scoreboard for match {MatchId} because the template image at {TemplatePath} could not be decoded.",
+                    matchId, templatePath);
                 return null;
             }
 
             using var canvas = new SKCanvas(bitmap);
 
-            var typeface = SKTypeface.FromFamilyName("Arial", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+            const string requestedFontFamily = "Arial";
+            var typeface = SKTypeface.FromFamilyName(requestedFontFamily, SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
+            if (typeface is null)
+            {
+                logger.LogWarning(
+                    "The font {RequestedFont} could not be resolved for match {MatchId}, so the default typeface was used instead.",
+                    requestedFontFamily, matchId);
+                typeface = SKTypeface.Default;
+            }
+
             using var font = new SKFont(typeface, 32);
             using var paint = new SKPaint();
             paint.Color = SKColors.White;
@@ -135,7 +161,22 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
 
             // Encode to PNG MemoryStream
             using var image = SKImage.FromBitmap(bitmap);
+            if (image is null)
+            {
+                logger.LogError(
+                    "Could not generate the scoreboard for match {MatchId} because the rendered bitmap could not be converted to an image.",
+                    matchId);
+                return null;
+            }
+
             using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+            if (data is null)
+            {
+                logger.LogError(
+                    "Could not generate the scoreboard for match {MatchId} because the image failed to encode to PNG.",
+                    matchId);
+                return null;
+            }
 
             var memoryStream = new MemoryStream();
             data.SaveTo(memoryStream);

@@ -16,8 +16,30 @@ public class NakamaApiService(
     IOptions<BotOptions> botOptions,
     ILogger<NakamaApiService> logger)
 {
+    /// <summary>
+    /// Verifies that a required configuration value is present. Logs an error naming the setting
+    /// when it is missing so callers can return a failure value instead of throwing later.
+    /// </summary>
+    private bool RequireConfig(string? value, string settingName)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+            return true;
+
+        logger.LogError("Required configuration value {SettingName} is missing or empty.", settingName);
+        return false;
+    }
+
     public async Task<TokenResponse?> GetNakamaTokenAsync()
     {
+        if (!RequireConfig(nakamaOptions.Value.BaseUrl, "Nakama:BaseUrl") ||
+            !RequireConfig(nakamaOptions.Value.AuthEndpoint, "Nakama:AuthEndpoint") ||
+            !RequireConfig(nakamaOptions.Value.HttpKey, "Nakama:HttpKey") ||
+            !RequireConfig(nakamaOptions.Value.Username, "Nakama:Username") ||
+            !RequireConfig(nakamaOptions.Value.Password, "Nakama:Password"))
+        {
+            return null;
+        }
+
         using var client = factory.CreateClient("Nakama");
 
         var tokenRequest = new TokenRequest
@@ -28,6 +50,8 @@ public class NakamaApiService(
 
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.AuthEndpoint}&http_key={nakamaOptions.Value.HttpKey}";
 
+        logger.LogDebug("Requesting Nakama authentication token from {Endpoint}", nakamaOptions.Value.AuthEndpoint);
+
         try
         {
             var response = await client.PostAsJsonAsync(url, tokenRequest);
@@ -36,33 +60,64 @@ public class NakamaApiService(
             if (response.IsSuccessStatusCode)
             {
                 var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(responseContent);
+                if (tokenResponse is null)
+                {
+                    logger.LogWarning("Nakama token response deserialized to null for endpoint {Endpoint}", nakamaOptions.Value.AuthEndpoint);
+                    return null;
+                }
+
+                logger.LogInformation("Nakama authentication token acquired successfully.");
                 return tokenResponse;
             }
 
+            var truncated = Truncate(responseContent);
             logger.LogError(
-                "Nakama token request failed. Status: {StatusCode}, Response: {Response}",
-                response.StatusCode, responseContent);
+                "Nakama token request failed. Status: {StatusCode}, Endpoint: {Endpoint}, Response: {Response}",
+                response.StatusCode, nakamaOptions.Value.AuthEndpoint, truncated);
             return null;
         }
         catch (HttpRequestException ex)
         {
-            logger.LogError(ex, "HttpRequestException while getting Nakama token");
+            logger.LogError(ex, "HttpRequestException while getting Nakama token from {Endpoint}", nakamaOptions.Value.AuthEndpoint);
             return null;
         }
         catch (TaskCanceledException ex)
         {
-            logger.LogError(ex, "Request timed out while getting Nakama token");
+            logger.LogError(ex, "Request timed out while getting Nakama token from {Endpoint}", nakamaOptions.Value.AuthEndpoint);
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse Nakama token response from {Endpoint}", nakamaOptions.Value.AuthEndpoint);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unexpected error while getting Nakama token");
+            logger.LogError(ex, "Unexpected error while getting Nakama token from {Endpoint}", nakamaOptions.Value.AuthEndpoint);
             return null;
         }
     }
 
+    /// <summary>
+    /// Truncates a response body to the first 500 characters for safe logging.
+    /// </summary>
+    private static string Truncate(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return string.Empty;
+
+        var trimmed = content.Trim();
+        return trimmed.Length > 500 ? trimmed[..500] : trimmed;
+    }
+
     public async Task<string?> GetNakamaIdAsync(string discordId, TokenResponse token)
     {
+        if (!RequireConfig(nakamaOptions.Value.BaseUrl, "Nakama:BaseUrl") ||
+            !RequireConfig(nakamaOptions.Value.LookupEndpoint, "Nakama:LookupEndpoint"))
+        {
+            return null;
+        }
+
         using var client = factory.CreateClient("Nakama");
 
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.LookupEndpoint}";
@@ -73,6 +128,8 @@ public class NakamaApiService(
             null,
             "application/json");
 
+        logger.LogDebug("Looking up Nakama ID for Discord ID {DiscordId}", discordId);
+
         try
         {
             var response = await client.PostAsync(url, content);
@@ -80,12 +137,22 @@ public class NakamaApiService(
 
             if (response.IsSuccessStatusCode)
             {
-                return responseContent.Split('"')[3];
+                var parts = responseContent.Split('"');
+                if (parts.Length < 4)
+                {
+                    logger.LogWarning(
+                        "Nakama ID lookup response for Discord ID {DiscordId} did not contain the expected id field. Response: {Response}",
+                        discordId, Truncate(responseContent));
+                    return null;
+                }
+
+                logger.LogInformation("Resolved Nakama ID for Discord ID {DiscordId}", discordId);
+                return parts[3];
             }
 
             logger.LogError(
                 "Nakama ID lookup failed for Discord ID {DiscordId}. Status: {StatusCode}, Response: {Response}",
-                discordId, response.StatusCode, responseContent);
+                discordId, response.StatusCode, Truncate(responseContent));
             return null;
         }
         catch (HttpRequestException ex)
@@ -107,10 +174,18 @@ public class NakamaApiService(
 
     public async Task<NakamaMatches?> GetNakamaMatchesAsync(TokenResponse token)
     {
+        if (!RequireConfig(nakamaOptions.Value.BaseUrl, "Nakama:BaseUrl") ||
+            !RequireConfig(nakamaOptions.Value.MatchEndpoint, "Nakama:MatchEndpoint"))
+        {
+            return null;
+        }
+
         using var client = factory.CreateClient("Nakama");
 
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.MatchEndpoint}";
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+
+        logger.LogDebug("Requesting Nakama match list from {Endpoint}", nakamaOptions.Value.MatchEndpoint);
 
         try
         {
@@ -121,37 +196,54 @@ public class NakamaApiService(
                 var responseContent = await response.Content.ReadAsStringAsync();
                 var serverList = JsonSerializer.Deserialize<NakamaMatches>(responseContent);
 
-                var matchCount = serverList?.Labels.Count ?? 0;
-                logger.LogInformation("Nakama matches retrieved successfully. Count: {MatchCount}", matchCount);
+                if (serverList is null)
+                {
+                    logger.LogWarning(
+                        "Nakama match list deserialized to null for endpoint {Endpoint}", nakamaOptions.Value.MatchEndpoint);
+                    return null;
+                }
+
+                logger.LogInformation("Nakama matches retrieved successfully. Count: {MatchCount}", serverList.Labels.Count);
 
                 return serverList;
             }
 
             var errorContent = await response.Content.ReadAsStringAsync();
             logger.LogError(
-                "Failed to retrieve Nakama matches. Status: {StatusCode}, Response: {Response}",
-                response.StatusCode, errorContent);
+                "Failed to retrieve Nakama matches. Status: {StatusCode}, Endpoint: {Endpoint}, Response: {Response}",
+                response.StatusCode, nakamaOptions.Value.MatchEndpoint, Truncate(errorContent));
             return null;
         }
         catch (HttpRequestException ex)
         {
-            logger.LogError(ex, "HttpRequestException during Nakama matches retrieval");
+            logger.LogError(ex, "HttpRequestException during Nakama matches retrieval from {Endpoint}", nakamaOptions.Value.MatchEndpoint);
             return null;
         }
         catch (TaskCanceledException ex)
         {
-            logger.LogError(ex, "Request timed out during Nakama matches retrieval");
+            logger.LogError(ex, "Request timed out during Nakama matches retrieval from {Endpoint}", nakamaOptions.Value.MatchEndpoint);
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse Nakama match list from {Endpoint}", nakamaOptions.Value.MatchEndpoint);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unexpected error during Nakama matches retrieval");
+            logger.LogError(ex, "Unexpected error during Nakama matches retrieval from {Endpoint}", nakamaOptions.Value.MatchEndpoint);
             return null;
         }
     }
 
     public async Task<GameServerLatencyModel?> GetUserLatencyDataAsync(string nakamaId, TokenResponse token)
     {
+        if (!RequireConfig(nakamaOptions.Value.BaseUrl, "Nakama:BaseUrl") ||
+            !RequireConfig(nakamaOptions.Value.StorageEndpoint, "Nakama:StorageEndpoint"))
+        {
+            return null;
+        }
+
         using var client = factory.CreateClient("Nakama");
 
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.StorageEndpoint}";
@@ -170,6 +262,8 @@ public class NakamaApiService(
             ]
         };
 
+        logger.LogDebug("Requesting latency history for Nakama user {NakamaId}", nakamaId);
+
         try
         {
             var response = await client.PostAsJsonAsync(url, storageRequest);
@@ -179,7 +273,7 @@ public class NakamaApiService(
             {
                 logger.LogError(
                     "Failed to get latency data for Nakama user {NakamaId}. Status: {StatusCode}, Response: {Response}",
-                    nakamaId, response.StatusCode, responseContent);
+                    nakamaId, response.StatusCode, Truncate(responseContent));
                 return null;
             }
 
@@ -195,7 +289,30 @@ public class NakamaApiService(
 
             var latencyData = JsonSerializer.Deserialize<GameServerLatencyModel>(
                 latencyObject.Value, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+            if (latencyData is null)
+            {
+                logger.LogWarning("Latency data deserialized to null for Nakama user {NakamaId}", nakamaId);
+                return null;
+            }
+
+            logger.LogDebug("Latency history retrieved for Nakama user {NakamaId}", nakamaId);
             return latencyData;
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "HttpRequestException while fetching latency data for Nakama user {NakamaId}", nakamaId);
+            return null;
+        }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogError(ex, "Request timed out while fetching latency data for Nakama user {NakamaId}", nakamaId);
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse latency data for Nakama user {NakamaId}", nakamaId);
+            return null;
         }
         catch (Exception ex)
         {
@@ -206,6 +323,8 @@ public class NakamaApiService(
 
     public MatchLabel? GetEmptyEchoMatchAsync(NakamaMatches matches, bool containEu = false)
     {
+        logger.LogDebug("Searching for an empty Echo match among {Count} candidates. ContainEu: {ContainEu}", matches.Labels.Count, containEu);
+
         // Remove unwanted matches from labels
         matches.Labels = matches.Labels
             .Where(x => !x.Id.Contains(nakamaOptions.Value.ExcludedBroadcasterId))
@@ -254,6 +373,12 @@ public class NakamaApiService(
     public async Task<string?> PrepareEchoMatchAsync(
         MatchLabel match, TokenResponse token, List<TeamOrientation>? players, string queueName)
     {
+        if (!RequireConfig(nakamaOptions.Value.BaseUrl, "Nakama:BaseUrl") ||
+            !RequireConfig(nakamaOptions.Value.PrepareEndpoint, "Nakama:PrepareEndpoint"))
+        {
+            return null;
+        }
+
         using var client = factory.CreateClient("Nakama");
 
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.PrepareEndpoint}";
@@ -280,20 +405,44 @@ public class NakamaApiService(
 
             if (response.IsSuccessStatusCode)
             {
+                var matchId = ExtractMatchId(responseContent);
+                if (string.IsNullOrEmpty(matchId))
+                {
+                    logger.LogWarning(
+                        "Echo match prepare response for queue {QueueName} did not contain a match id. Response: {Response}",
+                        queueName, Truncate(responseContent));
+                    return null;
+                }
+
                 logger.LogInformation(
-                    "Echo match prepared successfully. Queue: {QueueName}, Response: {Response}",
-                    queueName, responseContent);
-                return ExtractMatchId(responseContent);
+                    "Echo match {MatchId} prepared successfully on server {Endpoint} for queue {QueueName}",
+                    matchId, url, queueName);
+                return matchId;
             }
 
             logger.LogError(
-                "Failed to prepare Echo match. Status: {StatusCode}, Response: {Response}",
-                response.StatusCode, responseContent);
+                "Failed to prepare Echo match. Status: {StatusCode}, Endpoint: {Endpoint}, Response: {Response}",
+                response.StatusCode, url, Truncate(responseContent));
+            return null;
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "HttpRequestException during PrepareEchoMatchAsync for queue {QueueName}", queueName);
+            return null;
+        }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogError(ex, "Request timed out during PrepareEchoMatchAsync for queue {QueueName}", queueName);
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to serialize or parse data during PrepareEchoMatchAsync for queue {QueueName}", queueName);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Exception during PrepareEchoMatchAsync");
+            logger.LogError(ex, "Exception during PrepareEchoMatchAsync for queue {QueueName}", queueName);
             return null;
         }
     }
@@ -301,6 +450,12 @@ public class NakamaApiService(
     public async Task<string?> BackupPrepareEchoMatchAsync(
         MatchLabel match, TokenResponse token, List<TeamOrientation>? players, string queueName)
     {
+        if (!RequireConfig(nakamaOptions.Value.BaseUrl, "Nakama:BaseUrl") ||
+            !RequireConfig(nakamaOptions.Value.PrepareEndpoint, "Nakama:PrepareEndpoint"))
+        {
+            return null;
+        }
+
         using var client = factory.CreateClient("Nakama");
 
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.PrepareEndpoint}";
@@ -327,20 +482,44 @@ public class NakamaApiService(
 
             if (response.IsSuccessStatusCode)
             {
+                var matchId = ExtractMatchId(responseContent);
+                if (string.IsNullOrEmpty(matchId))
+                {
+                    logger.LogWarning(
+                        "Backup Echo match prepare response for queue {QueueName} did not contain a match id. Response: {Response}",
+                        queueName, Truncate(responseContent));
+                    return null;
+                }
+
                 logger.LogInformation(
-                    "Backup Echo match prepared successfully. Queue: {QueueName}, Response: {Response}",
-                    queueName, responseContent);
-                return ExtractMatchId(responseContent);
+                    "Backup Echo match {MatchId} prepared successfully on server {Endpoint} for queue {QueueName}",
+                    matchId, url, queueName);
+                return matchId;
             }
 
             logger.LogError(
-                "Failed to prepare backup Echo match. Status: {StatusCode}, Response: {Response}",
-                response.StatusCode, responseContent);
+                "Failed to prepare backup Echo match. Status: {StatusCode}, Endpoint: {Endpoint}, Response: {Response}",
+                response.StatusCode, url, Truncate(responseContent));
+            return null;
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "HttpRequestException during BackupPrepareEchoMatchAsync for queue {QueueName}", queueName);
+            return null;
+        }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogError(ex, "Request timed out during BackupPrepareEchoMatchAsync for queue {QueueName}", queueName);
+            return null;
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to serialize or parse data during BackupPrepareEchoMatchAsync for queue {QueueName}", queueName);
             return null;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Exception during BackupPrepareEchoMatchAsync");
+            logger.LogError(ex, "Exception during BackupPrepareEchoMatchAsync for queue {QueueName}", queueName);
             return null;
         }
     }
@@ -348,6 +527,12 @@ public class NakamaApiService(
     public async Task<(bool Result, string ResponseContent)> AssignPlayersToEchoMatchAsync(
         string userId, string sessionId, TokenResponse token, string playerColor)
     {
+        if (!RequireConfig(nakamaOptions.Value.BaseUrl, "Nakama:BaseUrl") ||
+            !RequireConfig(nakamaOptions.Value.AssignEndpoint, "Nakama:AssignEndpoint"))
+        {
+            return (false, string.Empty);
+        }
+
         using var client = factory.CreateClient("Nakama");
 
         var url = $"{nakamaOptions.Value.BaseUrl}{nakamaOptions.Value.AssignEndpoint}";
@@ -370,18 +555,34 @@ public class NakamaApiService(
 
             if (response.IsSuccessStatusCode)
             {
-                logger.LogInformation("Player assigned successfully. Response: {Response}", responseContent);
+                logger.LogInformation(
+                    "Player {UserId} assigned to Echo match {MatchId} as {PlayerColor}", userId, sessionId, playerColor);
                 return (true, responseContent);
             }
 
             logger.LogError(
-                "Failed to assign player to Echo match. Status: {StatusCode}, Response: {Response}",
-                response.StatusCode, responseContent);
+                "Failed to assign player {UserId} to Echo match {MatchId}. Status: {StatusCode}, Response: {Response}",
+                userId, sessionId, response.StatusCode, Truncate(responseContent));
             return (false, responseContent);
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "HttpRequestException during AssignPlayersToEchoMatchAsync for player {UserId} in match {MatchId}", userId, sessionId);
+            return (false, ex.Message);
+        }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogError(ex, "Request timed out during AssignPlayersToEchoMatchAsync for player {UserId} in match {MatchId}", userId, sessionId);
+            return (false, ex.Message);
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to serialize or parse data during AssignPlayersToEchoMatchAsync for player {UserId} in match {MatchId}", userId, sessionId);
+            return (false, ex.Message);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Exception during AssignPlayersToEchoMatchAsync");
+            logger.LogError(ex, "Exception during AssignPlayersToEchoMatchAsync for player {UserId} in match {MatchId}", userId, sessionId);
             return (false, ex.Message);
         }
     }

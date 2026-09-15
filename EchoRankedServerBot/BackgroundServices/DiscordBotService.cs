@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Discord;
 using Discord.Interactions;
 using Discord.WebSocket;
@@ -22,42 +23,92 @@ public class DiscordBotService(
     ILogger<DiscordBotService> logger)
     : IHostedService
 {
+    private bool _modulesRegistered;
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Apply database migrations
-        using (var scope = services.CreateScope())
+        try
         {
-            var db = scope.ServiceProvider.GetRequiredService<BotDbContext>();
-            await db.Database.MigrateAsync(cancellationToken);
-            logger.LogInformation("Database migrations applied");
+            // Apply database migrations
+            using (var scope = services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<BotDbContext>();
+                await db.Database.MigrateAsync(cancellationToken);
+                logger.LogInformation("Database migrations applied");
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Failed to apply database migrations, the bot cannot start");
+            throw;
         }
 
         var token = DataConstants.EnvironmentVariables.EchoRankedDiscordToken.GetAsEnvironmentVariable();
 
         // Wire events
         client.Log += LogAsync;
+        interactions.Log += LogAsync;
         client.Ready += OnReadyAsync;
+        client.Connected += OnConnectedAsync;
+        client.Disconnected += OnDisconnectedAsync;
         client.MessageReceived += OnMessageReceivedAsync;
         client.ChannelCreated += OnChannelCreatedAsync;
         client.ChannelDestroyed += OnChannelDestroyedAsync;
         client.GuildMemberUpdated += OnGuildMemberUpdatedAsync;
         client.SelectMenuExecuted += OnSelectMenuExecutedAsync;
         client.InteractionCreated += OnInteractionCreatedAsync;
+        interactions.SlashCommandExecuted += OnSlashCommandExecutedAsync;
+        interactions.ComponentCommandExecuted += OnComponentCommandExecutedAsync;
 
-        await client.LoginAsync(TokenType.Bot, token);
-        await client.StartAsync();
+        try
+        {
+            await client.LoginAsync(TokenType.Bot, token);
+            await client.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Failed to log in or start the Discord client, the bot cannot start");
+            throw;
+        }
 
         logger.LogInformation("Discord bot started");
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        await client.StopAsync();
-        logger.LogInformation("Discord bot stopped");
+        try
+        {
+            await client.StopAsync();
+            logger.LogInformation("Discord bot stopped");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error while stopping the Discord client");
+        }
+    }
+
+    private Task OnConnectedAsync()
+    {
+        logger.LogInformation("Discord client connected to the gateway");
+        return Task.CompletedTask;
+    }
+
+    private Task OnDisconnectedAsync(Exception ex)
+    {
+        logger.LogWarning(ex, "Discord client disconnected from the gateway");
+        return Task.CompletedTask;
     }
 
     private Task OnReadyAsync()
     {
+        if (_modulesRegistered)
+        {
+            logger.LogInformation("Ready event fired again, modules are already registered so registration was skipped");
+            return Task.CompletedTask;
+        }
+
+        _modulesRegistered = true;
+
         // Run on a background thread to avoid blocking the gateway task
         _ = Task.Run(async () =>
         {
@@ -72,7 +123,7 @@ public class DiscordBotService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in Ready handler");
+                logger.LogError(ex, "Error in Ready handler while registering modules for guild {GuildId}", options.Value.GuildId);
             }
         });
 
@@ -90,7 +141,8 @@ public class DiscordBotService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in MessageReceived handler");
+                logger.LogError(ex, "Error in MessageReceived handler for message {MessageId} from user {UserId} in channel {ChannelId}",
+                    message.Id, message.Author?.Id, message.Channel?.Id);
             }
         });
         return Task.CompletedTask;
@@ -107,7 +159,8 @@ public class DiscordBotService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in ChannelCreated handler");
+                logger.LogError(ex, "Error in ChannelCreated handler for channel {ChannelId} ({ChannelName})",
+                    channel.Id, (channel as SocketGuildChannel)?.Name);
             }
         });
         return Task.CompletedTask;
@@ -124,7 +177,8 @@ public class DiscordBotService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in ChannelDestroyed handler");
+                logger.LogError(ex, "Error in ChannelDestroyed handler for channel {ChannelId} ({ChannelName})",
+                    channel.Id, (channel as SocketGuildChannel)?.Name);
             }
         });
         return Task.CompletedTask;
@@ -141,7 +195,8 @@ public class DiscordBotService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in GuildMemberUpdated handler");
+                logger.LogError(ex, "Error in GuildMemberUpdated handler for user {UserId} in guild {GuildId}",
+                    after.Id, after.Guild?.Id);
             }
         });
         return Task.CompletedTask;
@@ -158,7 +213,8 @@ public class DiscordBotService(
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in SelectMenuExecuted handler");
+                logger.LogError(ex, "Error in SelectMenuExecuted handler for message {MessageId} from user {UserId} in channel {ChannelId}",
+                    component.Message?.Id, component.User?.Id, component.Channel?.Id);
             }
         });
         return Task.CompletedTask;
@@ -168,19 +224,98 @@ public class DiscordBotService(
     {
         _ = Task.Run(async () =>
         {
+            var commandName = interaction is SocketSlashCommand slashCommand ? slashCommand.Data.Name : null;
+
             try
             {
-                logger.LogInformation("Interaction received: Type={Type}, Id={Id}", interaction.Type, interaction.Id);
+                logger.LogInformation(
+                    "Interaction received: Type={Type}, Id={Id}, UserId={UserId}, CommandName={CommandName}",
+                    interaction.Type, interaction.Id, interaction.User?.Id, commandName);
+
                 var ctx = new SocketInteractionContext(client, interaction);
-                var result = await interactions.ExecuteCommandAsync(ctx, services);
+                var stopwatch = Stopwatch.StartNew();
+                var executeTask = interactions.ExecuteCommandAsync(ctx, services);
+
+                _ = WatchForSlowInteractionAsync(executeTask, interaction.Id, commandName);
+
+                var result = await executeTask;
+                stopwatch.Stop();
+
+                logger.LogInformation(
+                    "Interaction {Id} ({CommandName}) finished in {ElapsedMilliseconds} ms",
+                    interaction.Id, commandName, stopwatch.ElapsedMilliseconds);
+
                 if (!result.IsSuccess)
-                    logger.LogError("Interaction failed: {Error} ({ErrorReason})", result.Error, result.ErrorReason);
+                    logger.LogError("Interaction {Id} ({CommandName}) failed: {Error} ({ErrorReason})",
+                        interaction.Id, commandName, result.Error, result.ErrorReason);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error in InteractionCreated handler");
+                logger.LogError(ex, "Error in InteractionCreated handler for interaction {Id} ({CommandName})",
+                    interaction.Id, commandName);
             }
         });
+        return Task.CompletedTask;
+    }
+
+    private async Task WatchForSlowInteractionAsync(Task executeTask, ulong interactionId, string? commandName)
+    {
+        var firstWarning = await Task.WhenAny(executeTask, Task.Delay(TimeSpan.FromSeconds(3)));
+        if (firstWarning == executeTask)
+            return;
+
+        logger.LogWarning(
+            "Interaction {Id} ({CommandName}) has not finished after 3 seconds; Discord will report that the application did not respond",
+            interactionId, commandName);
+
+        var secondWarning = await Task.WhenAny(executeTask, Task.Delay(TimeSpan.FromSeconds(27)));
+        if (secondWarning == executeTask)
+            return;
+
+        logger.LogWarning(
+            "Interaction {Id} ({CommandName}) has not finished after 30 seconds",
+            interactionId, commandName);
+    }
+
+    private Task OnSlashCommandExecutedAsync(SlashCommandInfo commandInfo, IInteractionContext context, IResult result)
+    {
+        var userId = context.User?.Id;
+        var guildId = context.Guild?.Id;
+        var channelId = context.Channel?.Id;
+
+        if (result.IsSuccess)
+        {
+            logger.LogInformation("Slash command {CommandName} completed for user {UserId}",
+                commandInfo.Name, userId);
+        }
+        else
+        {
+            logger.LogError(
+                "Slash command {CommandName} failed for user {UserId} in guild {GuildId} channel {ChannelId}: {Error} ({ErrorReason})",
+                commandInfo.Name, userId, guildId, channelId, result.Error, result.ErrorReason);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnComponentCommandExecutedAsync(ComponentCommandInfo commandInfo, IInteractionContext context, IResult result)
+    {
+        var userId = context.User?.Id;
+        var guildId = context.Guild?.Id;
+        var channelId = context.Channel?.Id;
+
+        if (result.IsSuccess)
+        {
+            logger.LogInformation("Component command {CommandName} completed for user {UserId}",
+                commandInfo.Name, userId);
+        }
+        else
+        {
+            logger.LogError(
+                "Component command {CommandName} failed for user {UserId} in guild {GuildId} channel {ChannelId}: {Error} ({ErrorReason})",
+                commandInfo.Name, userId, guildId, channelId, result.Error, result.ErrorReason);
+        }
+
         return Task.CompletedTask;
     }
 

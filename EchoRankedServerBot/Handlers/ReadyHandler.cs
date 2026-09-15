@@ -31,37 +31,73 @@ public class ReadyHandler(
 
         foreach (var channel in queueChannels)
         {
-            var queueNumber = channel.Name.Split('-')[1];
-
-            // Find existing live match message
-            var liveMatchesChannel = discord.GetTextChannel(options.Value.LiveMatchesChannelId);
-            ulong? liveMessageId = null;
-            if (liveMatchesChannel != null)
+            try
             {
-                var messages = await liveMatchesChannel.GetMessagesAsync().FlattenAsync(); // Defaults to 100 messages, flatten since it's a readonly enumerable
-                var embedMessage = messages
-                    .FirstOrDefault(x => x.Embeds.Count > 0 && x.Embeds.Any(y => y.Title != null && y.Title.Contains(channel.Name)));
-                liveMessageId = embedMessage?.Id;
-            }
-
-            var echoMatch = new EchoMatch
-            {
-                MatchId = Guid.NewGuid().ToString(),
-                PrivateMatchDetails = new PrivateMatchDetails
+                var nameParts = channel.Name.Split('-');
+                if (nameParts.Length < 2 || string.IsNullOrWhiteSpace(nameParts[1]))
                 {
-                    QueueNumber = queueNumber,
-                    QueueChannelId = channel.Id,
-                    MatchStarting = false,
-                    StatsUploaded = false,
-                    LiveMatchMessageId = liveMessageId
-                },
-                EchoMatchInstance = new EchoMatchInstance()
-            };
+                    logger.LogWarning("Could not parse the queue number from channel name {ChannelName}, skipping this channel", channel.Name);
+                    continue;
+                }
 
-            matchState.TryAdd(echoMatch);
+                var queueNumber = nameParts[1];
+
+                // Find existing live match message
+                var liveMatchesChannel = discord.GetTextChannel(options.Value.LiveMatchesChannelId);
+                ulong? liveMessageId = null;
+                if (liveMatchesChannel == null)
+                {
+                    logger.LogWarning("Could not find the live matches channel {ChannelId}, so no existing live match message will be linked for {ChannelName}", options.Value.LiveMatchesChannelId, channel.Name);
+                }
+                else
+                {
+                    try
+                    {
+                        var messages = await liveMatchesChannel.GetMessagesAsync().FlattenAsync(); // Defaults to 100 messages, flatten since it's a readonly enumerable
+                        var embedMessage = messages
+                            .FirstOrDefault(x => x.Embeds.Count > 0 && x.Embeds.Any(y => y.Title != null && y.Title.Contains(channel.Name)));
+                        liveMessageId = embedMessage?.Id;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Failed to fetch messages from the live matches channel {ChannelId} while looking for an existing message for {ChannelName}", options.Value.LiveMatchesChannelId, channel.Name);
+                    }
+                }
+
+                var echoMatch = new EchoMatch
+                {
+                    MatchId = Guid.NewGuid().ToString(),
+                    PrivateMatchDetails = new PrivateMatchDetails
+                    {
+                        QueueNumber = queueNumber,
+                        QueueChannelId = channel.Id,
+                        MatchStarting = false,
+                        StatsUploaded = false,
+                        LiveMatchMessageId = liveMessageId
+                    },
+                    EchoMatchInstance = new EchoMatchInstance()
+                };
+
+                if (!matchState.TryAdd(echoMatch))
+                {
+                    logger.LogWarning("Could not register match state for queue channel {ChannelId} ({ChannelName}), it may already be tracked", channel.Id, channel.Name);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to initialize tracking for queue channel {ChannelId} ({ChannelName}), continuing with the remaining channels", channel.Id, channel.Name);
+            }
         }
 
-        await client.SetGameAsync("Echo VR Ranked");
+        try
+        {
+            await client.SetGameAsync("Echo VR Ranked");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to set the bot's activity status, continuing startup anyway");
+        }
+
         logger.LogInformation("Bot ready. Tracking {Count} queue channels", queueChannels.Count);
     }
 }

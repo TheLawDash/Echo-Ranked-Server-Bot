@@ -38,11 +38,24 @@ public static class ServiceCollectionExtensions
             GatewayIntents = GatewayIntents.All,
             LogLevel = LogSeverity.Info,
             AlwaysDownloadUsers = true,
-            MessageCacheSize = 100
+            MessageCacheSize = 100,
+            // The default RetryMode is AlwaysRetry, which silently retries a timed out REST
+            // request forever with no log line, so a hung request never surfaces as a failure.
+            // RetryRatelimit only retries on a rate limit and lets other failures throw.
+            DefaultRetryMode = RetryMode.RetryRatelimit
         };
         var client = new DiscordSocketClient(clientConfig);
         services.AddSingleton(client);
-        services.AddSingleton(new InteractionService(client));
+
+        var interactionServiceConfig = new InteractionServiceConfig
+        {
+            LogLevel = LogSeverity.Info,
+            // Errors must surface through the returned IResult instead of being swallowed by a
+            // fire and forget async run mode.
+            DefaultRunMode = RunMode.Sync,
+            ThrowOnError = true
+        };
+        services.AddSingleton(new InteractionService(client, interactionServiceConfig));
 
         // HTTP clients
         services.AddHttpClient("Nakama");

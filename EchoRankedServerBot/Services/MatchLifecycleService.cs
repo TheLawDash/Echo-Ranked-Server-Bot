@@ -18,6 +18,25 @@ public class MatchLifecycleService(
     ILogger<MatchLifecycleService> logger)
 {
     /// <summary>
+    /// Attempts to extract the raw Discord user ID from a mention string such as "<@123456789>".
+    /// Returns false and an empty ID if the input does not have the expected shape.
+    /// </summary>
+    private static bool TryParseDiscordMention(string rawMention, out string discordId)
+    {
+        discordId = string.Empty;
+        var atParts = rawMention.Split('@');
+        if (atParts.Length < 2)
+            return false;
+
+        var idParts = atParts[1].Split('>');
+        if (idParts.Length < 1 || string.IsNullOrWhiteSpace(idParts[0]))
+            return false;
+
+        discordId = idParts[0];
+        return true;
+    }
+
+    /// <summary>
     /// Resolves player mentions into TeamOrientation objects by looking up Nakama IDs,
     /// and resolves the corresponding SocketGuildUsers from the guild.
     /// </summary>
@@ -28,7 +47,6 @@ public class MatchLifecycleService(
         if (token is null)
         {
             logger.LogError("Nakama token was null in SetTeamOrientationsAsync");
-            await discord.LogInfoAsync($"{DiscordChannelService.GetDiscordTimestamp()} `Nakama token was null in SetTeamOrientationsAsync`");
             return (null, null);
         }
 
@@ -37,10 +55,22 @@ public class MatchLifecycleService(
 
         foreach (var player in orange)
         {
-            var discordId = player.Split('@')[1].Split('>')[0];
+            if (!TryParseDiscordMention(player, out var discordId))
+            {
+                logger.LogWarning(
+                    "SetTeamOrientationsAsync: Could not parse a Discord mention from orange team entry {RawMention}",
+                    player);
+                continue;
+            }
+
             var nakamaId = await nakamaApi.GetNakamaIdAsync(discordId, token);
             if (nakamaId is null)
+            {
+                logger.LogWarning(
+                    "SetTeamOrientationsAsync: No Nakama ID found for Discord user {DiscordId} on orange team",
+                    discordId);
                 continue;
+            }
 
             teamOrientations.Add(new TeamOrientation
             {
@@ -49,17 +79,41 @@ public class MatchLifecycleService(
                 NakamaId = nakamaId
             });
 
-            var user = guild.GetUser(ulong.Parse(discordId));
+            if (!ulong.TryParse(discordId, out var discordIdValue))
+            {
+                logger.LogWarning(
+                    "SetTeamOrientationsAsync: Discord ID {DiscordId} for orange team could not be parsed as a ulong",
+                    discordId);
+                continue;
+            }
+
+            var user = guild.GetUser(discordIdValue);
             if (user is not null)
                 responseMembers.Add(user);
+            else
+                logger.LogWarning(
+                    "SetTeamOrientationsAsync: Could not find guild member for Discord ID {DiscordId} on orange team",
+                    discordId);
         }
 
         foreach (var player in blue)
         {
-            var discordId = player.Split('@')[1].Split('>')[0];
+            if (!TryParseDiscordMention(player, out var discordId))
+            {
+                logger.LogWarning(
+                    "SetTeamOrientationsAsync: Could not parse a Discord mention from blue team entry {RawMention}",
+                    player);
+                continue;
+            }
+
             var nakamaId = await nakamaApi.GetNakamaIdAsync(discordId, token);
             if (nakamaId is null)
+            {
+                logger.LogWarning(
+                    "SetTeamOrientationsAsync: No Nakama ID found for Discord user {DiscordId} on blue team",
+                    discordId);
                 continue;
+            }
 
             teamOrientations.Add(new TeamOrientation
             {
@@ -68,9 +122,21 @@ public class MatchLifecycleService(
                 NakamaId = nakamaId
             });
 
-            var user = guild.GetUser(ulong.Parse(discordId));
+            if (!ulong.TryParse(discordId, out var discordIdValue))
+            {
+                logger.LogWarning(
+                    "SetTeamOrientationsAsync: Discord ID {DiscordId} for blue team could not be parsed as a ulong",
+                    discordId);
+                continue;
+            }
+
+            var user = guild.GetUser(discordIdValue);
             if (user is not null)
                 responseMembers.Add(user);
+            else
+                logger.LogWarning(
+                    "SetTeamOrientationsAsync: Could not find guild member for Discord ID {DiscordId} on blue team",
+                    discordId);
         }
 
         return (teamOrientations, responseMembers);
@@ -90,7 +156,6 @@ public class MatchLifecycleService(
         if (token is null)
         {
             logger.LogError("Failed to retrieve Nakama token in CreateRankedEchoMatchAsync");
-            await discord.LogInfoAsync("Failed to retrieve Nakama token in CreateRankedEchoMatchAsync.");
             return null;
         }
 
@@ -98,7 +163,6 @@ public class MatchLifecycleService(
         if (echoMatches is null)
         {
             logger.LogError("Failed to retrieve Nakama matches in CreateRankedEchoMatchAsync");
-            await discord.LogInfoAsync("Failed to retrieve Nakama matches in CreateRankedEchoMatchAsync.");
             return null;
         }
 
@@ -110,7 +174,6 @@ public class MatchLifecycleService(
         else
         {
             logger.LogInformation("Latency-based server decision skipped (no players provided)");
-            await discord.LogInfoAsync("Latency-based server decision skipped (no players provided).");
         }
 
         var echoMatch = serverDecision?.Match ?? nakamaApi.GetEmptyEchoMatchAsync(echoMatches, containsEu);
@@ -118,20 +181,17 @@ public class MatchLifecycleService(
         if (serverDecision is null)
         {
             logger.LogInformation("Latency data not available for selection, using default server ordering");
-            await discord.LogInfoAsync("Latency data not available for selection, using default server ordering.");
         }
 
         if (echoMatch is null)
         {
             logger.LogError("Failed to find an empty Echo match in CreateRankedEchoMatchAsync");
-            await discord.LogInfoAsync("Failed to find an empty Echo match in CreateRankedEchoMatchAsync.");
             return null;
         }
 
         if (rankedMatch.PrivateMatchDetails is null)
         {
             logger.LogError("Invalid private match details in CreateRankedEchoMatchAsync");
-            await discord.LogInfoAsync("Invalid private match details in CreateRankedEchoMatchAsync.");
             return null;
         }
 
@@ -147,28 +207,43 @@ public class MatchLifecycleService(
         rankedMatch.PrivateMatchDetails.PlayersUsedForDecision = serverDecision?.PlayersUsed;
 
         var queueChannel = discord.GetTextChannel(rankedMatch.PrivateMatchDetails.QueueChannelId);
+        if (queueChannel is null)
+        {
+            logger.LogWarning(
+                "CreateRankedEchoMatchAsync: Queue channel {ChannelId} was not found, falling back to a generic queue name",
+                rankedMatch.PrivateMatchDetails.QueueChannelId);
+        }
         var queueName = queueChannel?.Name ?? "unknown-queue";
 
         var matchId = await nakamaApi.PrepareEchoMatchAsync(echoMatch, token, players, queueName);
         if (matchId is null)
         {
             logger.LogWarning("Failed to prepare Echo match. Attempting backup");
-            await discord.LogInfoAsync("Failed to prepare Echo match in CreateRankedEchoMatchAsync. Attempting backup.");
 
             matchId = await nakamaApi.BackupPrepareEchoMatchAsync(echoMatch, token, players, queueName);
             if (matchId is null)
             {
                 logger.LogError("Backup preparation also failed in CreateRankedEchoMatchAsync");
-                await discord.LogInfoAsync("Backup preparation also failed in CreateRankedEchoMatchAsync.");
                 return null;
             }
         }
 
-        if (players is null) return echoMatch;
+        if (players is null)
+        {
+            logger.LogInformation(
+                "CreateRankedEchoMatchAsync: No players were provided, skipping player assignment for match {MatchId}",
+                echoMatch.Id);
+            return echoMatch;
+        }
         foreach (var player in players)
         {
             if (player.NakamaId is null || player.TeamName is null || player.DiscordId is null)
+            {
+                logger.LogWarning(
+                    "CreateRankedEchoMatchAsync: Skipping player with missing data for match {MatchId}. NakamaId present: {HasNakamaId}, TeamName present: {HasTeamName}, DiscordId present: {HasDiscordId}",
+                    echoMatch.Id, player.NakamaId is not null, player.TeamName is not null, player.DiscordId is not null);
                 continue;
+            }
 
             var (result, responseMessage) = await nakamaApi.AssignPlayersToEchoMatchAsync(
                 player.NakamaId, echoMatch.Id, token, player.TeamName);
@@ -178,25 +253,34 @@ public class MatchLifecycleService(
                 logger.LogWarning(
                     "Failed to assign <@{DiscordId}> to {QueueName}. Response: {Response}",
                     player.DiscordId, queueName, responseMessage);
-                await discord.LogInfoAsync(
-                    $"{DiscordChannelService.GetDiscordTimestamp()} `Failed to assign <@{player.DiscordId}> to {queueName}, response:`\n```json\n{responseMessage}\n```");
                 continue;
             }
 
-            var discordPlayer = discordPlayers.FirstOrDefault(x => x.Id == ulong.Parse(player.DiscordId));
+            if (!ulong.TryParse(player.DiscordId, out var discordIdValue))
+            {
+                logger.LogWarning(
+                    "CreateRankedEchoMatchAsync: Discord ID {DiscordId} could not be parsed as a ulong, skipping DM for {QueueName}",
+                    player.DiscordId, queueName);
+                continue;
+            }
+
+            var discordPlayer = discordPlayers.FirstOrDefault(x => x.Id == discordIdValue);
+            if (discordPlayer is null)
+            {
+                logger.LogWarning(
+                    "CreateRankedEchoMatchAsync: Could not find Discord user <@{DiscordId}> among resolved players, skipping DM for {QueueName}",
+                    player.DiscordId, queueName);
+                continue;
+            }
+
             try
             {
-                if (discordPlayer is not null)
-                {
-                    await discordPlayer.SendMessageAsync(
-                        $"Your match for {queueName} has been created, please open Echo and press play to join.");
-                }
+                await discordPlayer.SendMessageAsync(
+                    $"Your match for {queueName} has been created, please open Echo and press play to join.");
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to DM player <@{DiscordId}> for {QueueName}", player.DiscordId, queueName);
-                await discord.LogInfoAsync(
-                    $"{DiscordChannelService.GetDiscordTimestamp()} `Failed to send message to <@{player.DiscordId}> for {queueName}`");
             }
         }
 

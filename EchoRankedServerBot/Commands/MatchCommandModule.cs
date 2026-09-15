@@ -5,6 +5,7 @@ using EchoRankedServerBot.Configuration;
 using EchoRankedServerBot.Models.Match;
 using EchoRankedServerBot.BackgroundServices;
 using EchoRankedServerBot.Services;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace EchoRankedServerBot.Commands;
@@ -16,18 +17,37 @@ public class MatchCommandModule(
     DiscordChannelService discord,
     WatchService watchService,
     BotConfigService config,
-    IOptions<BotOptions> options)
+    IOptions<BotOptions> options,
+    ILogger<MatchCommandModule> logger)
     : InteractionModuleBase<SocketInteractionContext>
 {
+    public override Task BeforeExecuteAsync(ICommandInfo command)
+    {
+        logger.LogInformation("Starting slash command {Name} for user {UserId} in channel {ChannelId}",
+            command.Name, Context.User.Id, Context.Channel.Id);
+        return Task.CompletedTask;
+    }
+
+    public override Task AfterExecuteAsync(ICommandInfo command)
+    {
+        logger.LogInformation("Finished slash command {Name} for user {UserId}", command.Name, Context.User.Id);
+        return Task.CompletedTask;
+    }
+
     [SlashCommand("repull", "Pull a new server for your private match.")]
     // ReSharper disable once UnusedMember.Global
     public async Task RepullServerInstanceAsync()
     {
         if (Context.Guild.Id != options.Value.GuildId)
+        {
+            logger.LogWarning("Repull command was ignored because guild {GuildId} is not the configured guild {ConfiguredGuildId}",
+                Context.Guild.Id, options.Value.GuildId);
             return;
+        }
 
         if (Context.Channel is not SocketTextChannel textChannel || !textChannel.Name.Contains("queue-"))
         {
+            logger.LogInformation("Repull command was refused because channel {ChannelId} is not a queue channel", Context.Channel.Id);
             await RespondAsync("Please do this in a proper queue channel.", ephemeral: true);
             return;
         }
@@ -35,6 +55,7 @@ public class MatchCommandModule(
         var rankedMatch = matchState.GetByChannelId(textChannel.Id);
         if (rankedMatch == null)
         {
+            logger.LogWarning("Could not find a live match for channel {ChannelId}, so the repull command was ignored.", textChannel.Id);
             await RespondAsync("No match found for this channel.", ephemeral: true);
             return;
         }
@@ -46,6 +67,8 @@ public class MatchCommandModule(
 
         if (neatQueueMessage == null)
         {
+            logger.LogWarning("Could not find a NeatQueue message in channel {ChannelId} for match {MatchId}, so the queue has not popped yet.",
+                textChannel.Id, rankedMatch.MatchId);
             await RespondAsync("Queue has not yet popped.", ephemeral: true);
             return;
         }
@@ -65,6 +88,8 @@ public class MatchCommandModule(
 
         if (matchCreated == null)
         {
+            logger.LogError("Failed to create a ranked echo match for match {MatchId} in channel {ChannelId}, notifying the channel of the error.",
+                rankedMatch.MatchId, textChannel.Id);
             await lifecycle.SendServerPullErrorAsync(textChannel);
             return;
         }
@@ -89,9 +114,10 @@ public class MatchCommandModule(
                 var oldSparkMsg = await textChannel.GetMessageAsync(rankedMatch.PrivateMatchDetails.SparkLinkMessageId.Value);
                 if (oldSparkMsg != null) await oldSparkMsg.DeleteAsync();
             }
-            catch
+            catch (Exception ex)
             {
-                // ignored
+                logger.LogWarning(ex, "Could not delete the old spark link message {MessageId} in channel {ChannelId} for match {MatchId}.",
+                    rankedMatch.PrivateMatchDetails.SparkLinkMessageId.Value, textChannel.Id, rankedMatch.MatchId);
             }
         }
 
@@ -100,7 +126,12 @@ public class MatchCommandModule(
         // Send or update live match message
         var liveMessageId = rankedMatch.PrivateMatchDetails?.LiveMatchMessageId;
         var liveChannel = discord.GetTextChannel(options.Value.LiveMatchesChannelId);
-        if (liveChannel != null)
+        if (liveChannel == null)
+        {
+            logger.LogWarning("Could not find the live matches channel {LiveMatchesChannelId}, so the live match message was not updated for match {MatchId}.",
+                options.Value.LiveMatchesChannelId, rankedMatch.MatchId);
+        }
+        else
         {
             var templatePath = Path.Combine(AppContext.BaseDirectory, "Assets", "original.png");
             await using var fileStream = new FileStream(templatePath, FileMode.Open, FileAccess.Read);
@@ -124,8 +155,10 @@ public class MatchCommandModule(
                         });
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    logger.LogWarning(ex, "Could not modify the existing live match message {MessageId} for match {MatchId}, sending a new one instead.",
+                        liveMessageId.Value, rankedMatch.MatchId);
                     var newMsg = await liveChannel.SendFileAsync(fileStream, "original.png", embed: liveEmbed.Build());
                     liveMessageId = newMsg.Id;
                 }
@@ -159,14 +192,28 @@ public class MatchCommandModule(
         [Summary("user", "User to whitelist")] IUser user,
         [Summary("ip", "IP address to watch")] string ipAddress)
     {
-        if (Context.Guild.Id != options.Value.GuildId) return;
+        if (Context.Guild.Id != options.Value.GuildId)
+        {
+            logger.LogWarning("Watch command was ignored because guild {GuildId} is not the configured guild {ConfiguredGuildId}",
+                Context.Guild.Id, options.Value.GuildId);
+            return;
+        }
+
         if (Context.User.Id != options.Value.OwnerUserId)
         {
+            logger.LogWarning("Watch command was refused because user {UserId} is not the bot owner.", Context.User.Id);
             await RespondAsync("This command is reserved for the bot owner.", ephemeral: true);
             return;
         }
 
         var result = await watchService.WatchAsync(user.Id.ToString(), ipAddress);
+        if (!result)
+            logger.LogWarning("Failed to watch IP address {IpAddress} for user {UserId}, requested by {RequestingUserId}.",
+                ipAddress, user.Id, Context.User.Id);
+        else
+            logger.LogInformation("Now watching IP address {IpAddress}, excluding user {UserId}, requested by {RequestingUserId}.",
+                ipAddress, user.Id, Context.User.Id);
+
         await RespondAsync(result
             ? $"Successfully watching for users on {ipAddress}, excluding {user.Username}."
             : $"Failed to watch for users on {ipAddress}.",
@@ -178,14 +225,28 @@ public class MatchCommandModule(
         [Summary("user", "User to unwatch")] IUser user,
         [Summary("ip", "IP address to unwatch")] string ipAddress)
     {
-        if (Context.Guild.Id != options.Value.GuildId) return;
+        if (Context.Guild.Id != options.Value.GuildId)
+        {
+            logger.LogWarning("Unwatch command was ignored because guild {GuildId} is not the configured guild {ConfiguredGuildId}",
+                Context.Guild.Id, options.Value.GuildId);
+            return;
+        }
+
         if (Context.User.Id != options.Value.OwnerUserId)
         {
+            logger.LogWarning("Unwatch command was refused because user {UserId} is not the bot owner.", Context.User.Id);
             await RespondAsync("This command is reserved for the bot owner.", ephemeral: true);
             return;
         }
 
         var result = await watchService.UnwatchAsync(user.Id.ToString(), ipAddress);
+        if (!result)
+            logger.LogWarning("Failed to unwatch IP address {IpAddress} for user {UserId}, requested by {RequestingUserId}.",
+                ipAddress, user.Id, Context.User.Id);
+        else
+            logger.LogInformation("Stopped watching IP address {IpAddress}, excluding user {UserId}, requested by {RequestingUserId}.",
+                ipAddress, user.Id, Context.User.Id);
+
         await RespondAsync(result
             ? $"Successfully unwatched users on {ipAddress}, excluding {user.Username}."
             : $"Failed to unwatch users on {ipAddress}.",
@@ -196,14 +257,22 @@ public class MatchCommandModule(
     public async Task ToggleMmrRestrictionAsync(
         [Summary("enabled", "Enable or disable")] bool enabled)
     {
-        if (Context.Guild.Id != options.Value.GuildId) return;
+        if (Context.Guild.Id != options.Value.GuildId)
+        {
+            logger.LogWarning("Toggle MMR restriction command was ignored because guild {GuildId} is not the configured guild {ConfiguredGuildId}",
+                Context.Guild.Id, options.Value.GuildId);
+            return;
+        }
+
         if (Context.User.Id != options.Value.OwnerUserId)
         {
+            logger.LogWarning("Toggle MMR restriction command was refused because user {UserId} is not the bot owner.", Context.User.Id);
             await RespondAsync("This command is reserved for the bot owner.", ephemeral: true);
             return;
         }
 
         config.SetEnforce1000MmrPartyRestriction(enabled);
+        logger.LogInformation("1000+ MMR party restriction set to {Enabled} by user {UserId}.", enabled, Context.User.Id);
         var status = enabled ? "**ENABLED**" : "**DISABLED**";
         await RespondAsync($"1000+ MMR party restriction is now {status}.", ephemeral: true);
     }
@@ -212,10 +281,16 @@ public class MatchCommandModule(
     public async Task JoinMatchAsync(
         [Summary("sparkID", "Spark link or session ID")] string sessionId)
     {
-        if (Context.Guild.Id != options.Value.GuildId) return;
+        if (Context.Guild.Id != options.Value.GuildId)
+        {
+            logger.LogWarning("Join command was ignored because guild {GuildId} is not the configured guild {ConfiguredGuildId}",
+                Context.Guild.Id, options.Value.GuildId);
+            return;
+        }
 
         if (Context.Channel is not SocketTextChannel textChannel || !textChannel.Name.Contains("queue-"))
         {
+            logger.LogInformation("Join command was refused because channel {ChannelId} is not a queue channel", Context.Channel.Id);
             await RespondAsync("Please do this in a proper queue channel.", ephemeral: true);
             return;
         }
@@ -229,12 +304,21 @@ public class MatchCommandModule(
         await RespondAsync("Starting match monitoring via streaming API!", ephemeral: true);
 
         var rankedMatch = matchState.GetByChannelId(textChannel.Id);
-        if (rankedMatch == null) return;
+        if (rankedMatch == null)
+        {
+            logger.LogWarning("Could not find a live match for channel {ChannelId}, so the join command was ignored.", textChannel.Id);
+            return;
+        }
 
         // Send live match message
         ulong? liveMessageId = null;
         var liveChannel = discord.GetTextChannel(options.Value.LiveMatchesChannelId);
-        if (liveChannel != null)
+        if (liveChannel == null)
+        {
+            logger.LogWarning("Could not find the live matches channel {LiveMatchesChannelId}, so the live match message was not sent for match {MatchId}.",
+                options.Value.LiveMatchesChannelId, rankedMatch.MatchId);
+        }
+        else
         {
             var templatePath = Path.Combine(AppContext.BaseDirectory, "Assets", "original.png");
             await using var fileStream = new FileStream(templatePath, FileMode.Open, FileAccess.Read);
@@ -270,21 +354,38 @@ public class MatchCommandModule(
         var isEligible = user?.Roles.Any(role => role.Id == options.Value.AdminRoleId) == true || user?.Id == options.Value.OwnerUserId;
         if (!isEligible)
         {
+            logger.LogWarning("Manual pull command was refused because user {UserId} does not have the admin role or owner permission.",
+                Context.User.Id);
             await RespondAsync("You do not have permission to use this command.", ephemeral: true);
             return;
         }
 
+        var chicagoRegionCode = GetConfiguredValueOrWarn(options.Value.ChicagoRegionCode, nameof(options.Value.ChicagoRegionCode));
+        var dallasRegionCode = GetConfiguredValueOrWarn(options.Value.DallasRegionCode, nameof(options.Value.DallasRegionCode));
+        var nebraskaServerIp = GetConfiguredValueOrWarn(options.Value.NebraskaServerIp, nameof(options.Value.NebraskaServerIp));
+        var pennsylvaniaServerIp = GetConfiguredValueOrWarn(options.Value.PennsylvaniaServerIp, nameof(options.Value.PennsylvaniaServerIp));
+        var kansasServerIp = GetConfiguredValueOrWarn(options.Value.KansasServerIp, nameof(options.Value.KansasServerIp));
+
         var menuBuilder = new SelectMenuBuilder()
             .WithCustomId("test_server_select")
             .WithPlaceholder("Select a server...")
-            .AddOption("Chicago", "chicago", options.Value.ChicagoRegionCode)
-            .AddOption("Dallas", "dallas", options.Value.DallasRegionCode)
+            .AddOption("Chicago", "chicago", chicagoRegionCode)
+            .AddOption("Dallas", "dallas", dallasRegionCode)
             .AddOption("EU", "eu", "EU 180hz")
-            .AddOption("Nebraska", "nebraska", options.Value.NebraskaServerIp)
-            .AddOption("Pennsylvania", "pennsylvania", options.Value.PennsylvaniaServerIp)
-            .AddOption("Kansas", "kansas", options.Value.KansasServerIp);
+            .AddOption("Nebraska", "nebraska", nebraskaServerIp)
+            .AddOption("Pennsylvania", "pennsylvania", pennsylvaniaServerIp)
+            .AddOption("Kansas", "kansas", kansasServerIp);
 
         var component = new ComponentBuilder().WithSelectMenu(menuBuilder).Build();
         await RespondAsync("Choose a server:", components: component, ephemeral: true);
+    }
+
+    private string GetConfiguredValueOrWarn(string? value, string settingName)
+    {
+        if (!string.IsNullOrEmpty(value))
+            return value;
+
+        logger.LogWarning("Configuration setting {SettingName} is empty, using a placeholder description in the manual pull menu.", settingName);
+        return "Not configured";
     }
 }

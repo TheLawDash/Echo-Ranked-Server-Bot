@@ -17,29 +17,57 @@ public class IpGeolocationService(
     /// </summary>
     public async Task<string> GetServerLocationAsync(string ip)
     {
+        var endpoint = $"http://ip-api.com/json/{ip}";
+        logger.LogDebug("Requesting server location for IP {Ip}", ip);
+
         try
         {
             using var client = factory.CreateClient("IpApi");
 
-            var response = await client.GetAsync($"http://ip-api.com/json/{ip}");
+            var response = await client.GetAsync(endpoint);
+            var responseContent = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogError(
-                    "Failed to fetch server location for IP {Ip}. StatusCode: {StatusCode}",
-                    ip, response.StatusCode);
+                    "ip-api returned status {StatusCode} for IP {Ip}, so the location is unknown. Response: {Response}",
+                    response.StatusCode, ip, Truncate(responseContent));
                 return "Unknown Location";
             }
 
-            var responseContent = await response.Content.ReadAsStringAsync();
             var ipInfo = JsonSerializer.Deserialize<ServerIpInformation>(responseContent);
 
-            if (ipInfo is not null) return $"{ipInfo.Region}, {ipInfo.City}";
-            logger.LogError(
-                "Failed to deserialize server location data for IP {Ip}. Response: {Response}",
-                ip, responseContent);
-            return "Unknown Location";
+            if (ipInfo is null)
+            {
+                logger.LogWarning(
+                    "Failed to deserialize server location data for IP {Ip}. Response: {Response}",
+                    ip, Truncate(responseContent));
+                return "Unknown Location";
+            }
 
+            if (string.IsNullOrWhiteSpace(ipInfo.Region) && string.IsNullOrWhiteSpace(ipInfo.City))
+            {
+                logger.LogWarning("Region and city fields were both missing for IP {Ip}", ip);
+                return "Unknown Location";
+            }
+
+            logger.LogDebug("Resolved server location for IP {Ip} to {Region}, {City}", ip, ipInfo.Region, ipInfo.City);
+            return $"{ipInfo.Region}, {ipInfo.City}";
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "HttpRequestException while fetching server location for IP {Ip}", ip);
+            return "Unknown Location";
+        }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogError(ex, "Request timed out while fetching server location for IP {Ip}", ip);
+            return "Unknown Location";
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse server location response for IP {Ip}", ip);
+            return "Unknown Location";
         }
         catch (Exception ex)
         {
@@ -49,24 +77,44 @@ public class IpGeolocationService(
     }
 
     /// <summary>
+    /// Truncates a response body to the first 500 characters for safe logging.
+    /// </summary>
+    private static string Truncate(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return string.Empty;
+
+        var trimmed = content.Trim();
+        return trimmed.Length > 500 ? trimmed[..500] : trimmed;
+    }
+
+    /// <summary>
     /// Checks if the given IP is using a VPN via proxycheck.io.
     /// Returns the VPN operator name or empty string if not a VPN.
     /// </summary>
     public async Task<string> CheckUserForVpnAsync(string ip)
     {
+        var apiKey = apiOptions.Value.ProxyCheckApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            logger.LogError("Required configuration value {SettingName} is missing or empty.", "Api:ProxyCheckApiKey");
+            return "";
+        }
+
+        logger.LogDebug("Checking IP {Ip} for VPN usage", ip);
+
         try
         {
             using var client = factory.CreateClient("IpApi");
 
-            var apiKey = apiOptions.Value.ProxyCheckApiKey;
             var response = await client.GetAsync($"http://proxycheck.io/v2/{ip}?key={apiKey}&vpn=1");
             var responseContent = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
             {
                 logger.LogError(
-                    "Failed to fetch VPN details for IP {Ip}. StatusCode: {StatusCode}, Response: {Response}",
-                    ip, response.StatusCode, responseContent);
+                    "proxycheck.io returned status {StatusCode} for IP {Ip}, so VPN status could not be determined. Response: {Response}",
+                    response.StatusCode, ip, Truncate(responseContent));
                 return "";
             }
 
@@ -74,9 +122,15 @@ public class IpGeolocationService(
 
             if (vpnApiResponse?.IpDetails is null)
             {
-                logger.LogError(
-                    "Failed to deserialize VPN response for IP {Ip}. Response: {Response}",
-                    ip, responseContent);
+                logger.LogWarning(
+                    "VPN response for IP {Ip} was missing the ip details field. Response: {Response}",
+                    ip, Truncate(responseContent));
+                return "";
+            }
+
+            if (vpnApiResponse.IpDetails.Count == 0)
+            {
+                logger.LogWarning("VPN response for IP {Ip} contained no ip details entries", ip);
                 return "";
             }
 
@@ -89,13 +143,28 @@ public class IpGeolocationService(
 
                     if (ipData is not { Proxy: "yes", Type: "VPN" }) continue;
                     var vpnOperator = ipData.Operator?.Name ?? "UNKNOWN";
+                    logger.LogInformation("VPN detected for IP {Ip}. Operator: {Operator}", ip, vpnOperator);
                     return vpnOperator;
                 }
-                catch (Exception ex)
+                catch (JsonException ex)
                 {
-                    logger.LogError(ex, "Error processing VPN data for IP {Ip}", ip);
+                    logger.LogError(ex, "Failed to parse VPN details for IP {Ip}", ip);
                 }
             }
+
+            logger.LogDebug("No VPN detected for IP {Ip}", ip);
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogError(ex, "HttpRequestException while checking VPN for IP {Ip}", ip);
+        }
+        catch (TaskCanceledException ex)
+        {
+            logger.LogError(ex, "Request timed out while checking VPN for IP {Ip}", ip);
+        }
+        catch (JsonException ex)
+        {
+            logger.LogError(ex, "Failed to parse VPN response for IP {Ip}", ip);
         }
         catch (Exception ex)
         {
