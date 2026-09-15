@@ -17,6 +17,10 @@ serviceAccount:
 secrets:
   existingSecret: echo-ranked-server-bot-secrets
 
+botStorage:
+  storageClass: standard
+  size: 1Gi
+
 postgres:
   image: postgres:17-alpine
   serviceName: echo-ranked-postgres

@@ -1,12 +1,13 @@
 using System.Text.Json;
 using EchoRankedServerBot.Models.Config;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace EchoRankedServerBot.Services;
 
-public class BotConfigService(ILogger<BotConfigService> logger)
+public class BotConfigService(ILogger<BotConfigService> logger, IConfiguration configuration)
 {
-    private const string ConfigPath = "bot-config.json";
+    private readonly string _configPath = configuration["Bot:RuntimeConfigPath"] ?? "bot-config.json";
 
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = true };
 
@@ -22,9 +23,9 @@ public class BotConfigService(ILogger<BotConfigService> logger)
         {
             try
             {
-                if (File.Exists(ConfigPath))
+                if (File.Exists(_configPath))
                 {
-                    var json = File.ReadAllText(ConfigPath);
+                    var json = File.ReadAllText(_configPath);
                     _cachedConfig = JsonSerializer.Deserialize<BotConfig>(json) ?? new BotConfig();
                 }
                 else
@@ -37,7 +38,7 @@ public class BotConfigService(ILogger<BotConfigService> logger)
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Failed to load bot config from {ConfigPath}", ConfigPath);
+                logger.LogError(ex, "Failed to load bot config from {ConfigPath}", _configPath);
                 return new BotConfig();
             }
         }
@@ -78,12 +79,12 @@ public class BotConfigService(ILogger<BotConfigService> logger)
         try
         {
             var json = JsonSerializer.Serialize(config, WriteOptions);
-            File.WriteAllText(ConfigPath, json);
+            File.WriteAllText(_configPath, json);
             _cachedConfig = config;
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to save bot config to {ConfigPath}", ConfigPath);
+            logger.LogError(ex, "Failed to save bot config to {ConfigPath}", _configPath);
         }
     }
 }

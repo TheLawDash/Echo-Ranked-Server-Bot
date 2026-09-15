@@ -19,6 +19,9 @@ spec:
     spec:
       serviceAccountName: {{ include "echo-ranked-server-bot.serviceAccountName" . }}
       automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 1654
+        fsGroupChangePolicy: OnRootMismatch
       imagePullSecrets:
         {{- toYaml .Values.imagePullSecrets | nindent 8 }}
       initContainers:
@@ -56,11 +59,15 @@ spec:
                   name: {{ $.Values.secrets.existingSecret }}
                   key: {{ $name }}
 {{- end }}
+            - name: Bot__RuntimeConfigPath
+              value: /app/data/bot-config.json
           volumeMounts:
             - name: configuration
               mountPath: /app/appsettings.json
               subPath: appsettings.json
               readOnly: true
+            - name: bot-data
+              mountPath: /app/data
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -77,4 +84,7 @@ spec:
             items:
               - key: appsettings.json
                 path: appsettings.json
+        - name: bot-data
+          persistentVolumeClaim:
+            claimName: echo-ranked-server-bot-data
       terminationGracePeriodSeconds: 30
