@@ -114,6 +114,10 @@ jobs:
           BOT_DALLAS_REGION_CODE: ${{ secrets.BOT_DALLAS_REGION_CODE }}
           BOT_OMAHA_REGION_CODE: ${{ secrets.BOT_OMAHA_REGION_CODE }}
           BOT_PGV_DC_CEVR_REGION_CODE: ${{ secrets.BOT_PGV_DC_CEVR_REGION_CODE }}
+          BOT_NEBRASKA_SERVER_IP: ${{ secrets.BOT_NEBRASKA_SERVER_IP }}
+          BOT_PENNSYLVANIA_SERVER_IP: ${{ secrets.BOT_PENNSYLVANIA_SERVER_IP }}
+          BOT_KANSAS_SERVER_IP: ${{ secrets.BOT_KANSAS_SERVER_IP }}
+          BOT_FALLBACK_SERVER_IP: ${{ secrets.BOT_FALLBACK_SERVER_IP }}
         run: |
           set -euo pipefail
           export APPSETTINGS_JSON_BASE64="$(
@@ -159,6 +163,10 @@ jobs:
               "DallasRegionCode": "BOT_DALLAS_REGION_CODE",
               "OmahaRegionCode": "BOT_OMAHA_REGION_CODE",
               "PgvDcCevrRegionCode": "BOT_PGV_DC_CEVR_REGION_CODE",
+              "NebraskaServerIp": "BOT_NEBRASKA_SERVER_IP",
+              "PennsylvaniaServerIp": "BOT_PENNSYLVANIA_SERVER_IP",
+              "KansasServerIp": "BOT_KANSAS_SERVER_IP",
+              "FallbackServerIp": "BOT_FALLBACK_SERVER_IP",
           }
           for key, source in region_mapping.items():
               value = os.environ[source].strip()
