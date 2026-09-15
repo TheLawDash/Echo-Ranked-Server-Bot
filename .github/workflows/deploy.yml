@@ -109,6 +109,11 @@ jobs:
           POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          BOT_CHICAGO_REGION_CODE: ${{ secrets.BOT_CHICAGO_REGION_CODE }}
+          BOT_RANKED_COMP_REGION_CODE: ${{ secrets.BOT_RANKED_COMP_REGION_CODE }}
+          BOT_DALLAS_REGION_CODE: ${{ secrets.BOT_DALLAS_REGION_CODE }}
+          BOT_OMAHA_REGION_CODE: ${{ secrets.BOT_OMAHA_REGION_CODE }}
+          BOT_PGV_DC_CEVR_REGION_CODE: ${{ secrets.BOT_PGV_DC_CEVR_REGION_CODE }}
         run: |
           set -euo pipefail
           export APPSETTINGS_JSON_BASE64="$(
@@ -147,7 +152,20 @@ jobs:
           })
           if not all(string_data.values()):
               raise SystemExit("A required deployment secret is empty.")
-          json.loads(string_data["appsettings.json"])
+          appsettings = json.loads(string_data["appsettings.json"])
+          region_mapping = {
+              "ChicagoRegionCode": "BOT_CHICAGO_REGION_CODE",
+              "RankedCompRegionCode": "BOT_RANKED_COMP_REGION_CODE",
+              "DallasRegionCode": "BOT_DALLAS_REGION_CODE",
+              "OmahaRegionCode": "BOT_OMAHA_REGION_CODE",
+              "PgvDcCevrRegionCode": "BOT_PGV_DC_CEVR_REGION_CODE",
+          }
+          for key, source in region_mapping.items():
+              value = os.environ[source].strip()
+              if not value:
+                  raise SystemExit("A required region setting is empty: " + source)
+              appsettings.setdefault("Bot", {})[key] = value
+          string_data["appsettings.json"] = json.dumps(appsettings)
           print(json.dumps({
               "apiVersion": "v1",
               "kind": "Secret",
