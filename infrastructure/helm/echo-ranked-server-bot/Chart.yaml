@@ -1,0 +1,6 @@
+apiVersion: v2
+name: echo-ranked-server-bot
+description: Echo Ranked Server Bot and PostgreSQL workload
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

@@ -1,0 +1,10 @@
+.git
+.github
+.idea
+.vs
+**/bin
+**/obj
+**/appsettings.json
+**/appsettings.*.json
+!**/appsettings.example.json
+infrastructure

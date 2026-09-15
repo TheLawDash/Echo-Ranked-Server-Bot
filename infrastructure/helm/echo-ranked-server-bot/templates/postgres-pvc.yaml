@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: echo-ranked-postgres-data
+  annotations:
+    helm.sh/resource-policy: keep
+  labels:
+    app.kubernetes.io/name: echo-ranked-postgres
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: law-general-bots
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.postgres.storage.storageClass | quote }}
+  resources:
+    requests:
+      storage: {{ .Values.postgres.storage.size }}
