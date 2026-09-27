@@ -143,3 +143,7 @@ local.settings.json
 *.claude
 EchoRankedServerBot/appsettings.json
 EchoTelemetryCli/appsettings.json
+
+# Licensed fonts live on the bot data volume, never in this public repo
+*.otf
+*.ttf

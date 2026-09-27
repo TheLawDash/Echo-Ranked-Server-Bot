@@ -61,6 +61,8 @@ spec:
 {{- end }}
             - name: Bot__RuntimeConfigPath
               value: /app/data/bot-config.json
+            - name: Bot__ScoreboardFontPath
+              value: {{ .Values.scoreboardFontPath | quote }}
           volumeMounts:
             - name: configuration
               mountPath: /app/appsettings.json

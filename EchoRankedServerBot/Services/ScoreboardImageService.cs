@@ -1,12 +1,16 @@
+using EchoRankedServerBot.Configuration;
 using EchoRankedServerBot.Models.EchoApi;
 using EchoRankedServerBot.Models.Match;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SkiaSharp;
 
 namespace EchoRankedServerBot.Services;
 
-public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
+public class ScoreboardImageService(IOptions<BotOptions> options, ILogger<ScoreboardImageService> logger)
 {
+    private readonly Lazy<SKTypeface> _typeface = new(() => LoadTypeface(options.Value.ScoreboardFontPath, logger));
+
     // Column center X positions
     private const int NameCenterX = 225;
     private const int PtSx = 450;
@@ -16,6 +20,13 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
     private const int StNx = 795;
     private const int PnGx = 877;
     private const int MvPx = 960;
+
+    private const float NameMaxWidth = 340;
+    private const float StatMaxWidth = 76;
+    private const float ScoreMaxWidth = 110;
+    private const float ClockMaxWidth = 250;
+    private const float MvpNameMaxWidth = 500;
+    private const float MvpScoreMaxWidth = 225;
 
     // Y positions for each player slot (blue team: indices 0-3, orange team: indices 4-7)
     private static readonly int[] NameYs = [713, 785, 860, 935, 200, 270, 345, 420];
@@ -66,17 +77,7 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
 
             using var canvas = new SKCanvas(bitmap);
 
-            const string requestedFontFamily = "Arial";
-            var typeface = SKTypeface.FromFamilyName(requestedFontFamily, SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
-            if (typeface is null)
-            {
-                logger.LogWarning(
-                    "The font {RequestedFont} could not be resolved for match {MatchId}, so the default typeface was used instead.",
-                    requestedFontFamily, matchId);
-                typeface = SKTypeface.Default;
-            }
-
-            using var font = new SKFont(typeface, 32);
+            using var font = new SKFont(_typeface.Value, 32);
             using var paint = new SKPaint();
             paint.Color = SKColors.White;
             paint.IsAntialias = true;
@@ -101,20 +102,20 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
                     {
                         font.Size = 32;
 
-                        DrawCenteredText(canvas, player.Name ?? "", font, paint, NameCenterX, NameYs[playerIndex]);
-                        DrawCenteredText(canvas, player.Stats?.Points.ToString() ?? "0", font, paint, PtSx, NameYs[playerIndex]);
-                        DrawCenteredText(canvas, player.Stats?.Assists.ToString() ?? "0", font, paint, AsTx, NameYs[playerIndex]);
-                        DrawCenteredText(canvas, player.Stats?.Saves.ToString() ?? "0", font, paint, Sx, NameYs[playerIndex]);
-                        DrawCenteredText(canvas, player.Stats?.Steals.ToString() ?? "0", font, paint, StLx, NameYs[playerIndex]);
-                        DrawCenteredText(canvas, player.Stats?.Stuns.ToString() ?? "0", font, paint, StNx, NameYs[playerIndex]);
-                        DrawCenteredText(canvas, player.Ping?.ToString() ?? "0", font, paint, PnGx, NameYs[playerIndex]);
+                        DrawCenteredText(canvas, player.Name ?? "", font, paint, NameCenterX, NameYs[playerIndex], NameMaxWidth);
+                        DrawCenteredText(canvas, player.Stats?.Points.ToString() ?? "0", font, paint, PtSx, NameYs[playerIndex], StatMaxWidth);
+                        DrawCenteredText(canvas, player.Stats?.Assists.ToString() ?? "0", font, paint, AsTx, NameYs[playerIndex], StatMaxWidth);
+                        DrawCenteredText(canvas, player.Stats?.Saves.ToString() ?? "0", font, paint, Sx, NameYs[playerIndex], StatMaxWidth);
+                        DrawCenteredText(canvas, player.Stats?.Steals.ToString() ?? "0", font, paint, StLx, NameYs[playerIndex], StatMaxWidth);
+                        DrawCenteredText(canvas, player.Stats?.Stuns.ToString() ?? "0", font, paint, StNx, NameYs[playerIndex], StatMaxWidth);
+                        DrawCenteredText(canvas, player.Ping?.ToString() ?? "0", font, paint, PnGx, NameYs[playerIndex], StatMaxWidth);
 
                         // Draw MVP score with smaller font
                         font.Size = 24;
                         var playerScore = playerScores.Find(x => x.Player?.UserId == player.UserId && x.Player?.Name == player.Name);
                         if (playerScore is not null)
                         {
-                            DrawCenteredText(canvas, playerScore.Score.ToString("F1"), font, paint, MvPx, NameYs[playerIndex] + 5);
+                            DrawCenteredText(canvas, playerScore.Score.ToString("F1"), font, paint, MvPx, NameYs[playerIndex] + 5, StatMaxWidth);
                         }
 
                         playerIndex++;
@@ -130,18 +131,18 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
 
             // Draw team scores
             font.Size = 62;
-            DrawCenteredText(canvas, echoMatchData.OrangePoints?.ToString() ?? "0", font, paint, 165, 535);
-            DrawCenteredText(canvas, echoMatchData.BluePoints?.ToString() ?? "0", font, paint, 875, 535);
+            DrawCenteredText(canvas, echoMatchData.OrangePoints?.ToString() ?? "0", font, paint, 165, 535, ScoreMaxWidth);
+            DrawCenteredText(canvas, echoMatchData.BluePoints?.ToString() ?? "0", font, paint, 875, 535, ScoreMaxWidth);
 
             // Draw game clock or "GAME OVER"
             font.Size = 36;
             if (echoMatchData.GameStatus == "post_match")
             {
-                DrawCenteredText(canvas, "GAME OVER", font, paint, 515, 515);
+                DrawCenteredText(canvas, "GAME OVER", font, paint, 515, 515, ClockMaxWidth);
             }
             else
             {
-                DrawCenteredText(canvas, echoMatchData.GameClockDisplay ?? "00:00", font, paint, 515, 515);
+                DrawCenteredText(canvas, echoMatchData.GameClockDisplay ?? "00:00", font, paint, 515, 515, ClockMaxWidth);
             }
 
             // Draw MVP name and score
@@ -150,14 +151,14 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
             if (mvp is not null)
             {
                 var mvpScoreEntry = playerScores.Find(x => x.Player?.Name == mvp.Name);
-                canvas.DrawText(mvp.Name ?? "", 125, 63, SKTextAlign.Left, font, paint);
-                canvas.DrawText(mvpScoreEntry?.Score.ToString("F3") ?? "0.000", 760, 66, SKTextAlign.Left, font, paint);
+                DrawText(canvas, mvp.Name ?? "", font, paint, 135, 63, MvpNameMaxWidth);
+                DrawText(canvas, mvpScoreEntry?.Score.ToString("F3") ?? "0.000", font, paint, 770, 66, MvpScoreMaxWidth);
             }
 
             // Draw round scores
             font.Size = 62;
-            canvas.DrawText(echoMatchData.OrangeRoundScore?.ToString() ?? "0", 300, 535, SKTextAlign.Left, font, paint);
-            canvas.DrawText(echoMatchData.BlueRoundScore?.ToString() ?? "0", 675, 535, SKTextAlign.Left, font, paint);
+            DrawText(canvas, echoMatchData.OrangeRoundScore?.ToString() ?? "0", font, paint, 300, 535, 70);
+            DrawText(canvas, echoMatchData.BlueRoundScore?.ToString() ?? "0", font, paint, 675, 535, 70);
 
             // Encode to PNG MemoryStream
             using var image = SKImage.FromBitmap(bitmap);
@@ -191,9 +192,37 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
         }
     }
 
-    private static void DrawCenteredText(SKCanvas canvas, string text, SKFont font, SKPaint paint, int centerX, int y)
+    private static void DrawText(SKCanvas canvas, string text, SKFont font, SKPaint paint, float x, int top, float maxWidth, bool centered = false)
     {
-        var textWidth = font.MeasureText(text);
-        canvas.DrawText(text, centerX - textWidth / 2, y, SKTextAlign.Left, font, paint);
+        var size = font.Size;
+        while (font.MeasureText(text) > maxWidth && font.Size > 10)
+            font.Size -= 1;
+
+        var width = font.MeasureText(text);
+        var left = centered ? x - width / 2 : x;
+        var shrunkTop = top + (size - font.Size) / 2;
+        canvas.DrawText(text, left, shrunkTop - font.Metrics.Ascent, SKTextAlign.Left, font, paint);
+        font.Size = size;
+    }
+
+    private static void DrawCenteredText(SKCanvas canvas, string text, SKFont font, SKPaint paint, int centerX, int top, float maxWidth) =>
+        DrawText(canvas, text, font, paint, centerX, top, maxWidth, centered: true);
+
+    private static SKTypeface LoadTypeface(string fontPath, ILogger logger)
+    {
+        if (!string.IsNullOrWhiteSpace(fontPath))
+        {
+            var typeface = File.Exists(fontPath) ? SKTypeface.FromFile(fontPath) : null;
+            if (typeface != null)
+            {
+                logger.LogInformation("Scoreboard font {FamilyName} loaded from {FontPath}", typeface.FamilyName, fontPath);
+                return typeface;
+            }
+
+            logger.LogWarning("The scoreboard font at {FontPath} could not be loaded, falling back to Arial", fontPath);
+        }
+
+        return SKTypeface.FromFamilyName("Arial", SKFontStyleWeight.Bold, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright)
+               ?? SKTypeface.Default;
     }
 }
