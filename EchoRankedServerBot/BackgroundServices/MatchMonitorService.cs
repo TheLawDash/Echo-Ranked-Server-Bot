@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Discord;
 using Discord.WebSocket;
 using EchoRankedServerBot.Configuration;
@@ -28,6 +29,8 @@ public class MatchMonitorCoordinator(
     IOptions<BotOptions> options,
     ILogger<MatchMonitorCoordinator> logger)
 {
+    private readonly ConcurrentDictionary<string, byte> _unnamedPlayersLogged = new();
+
     public void StartMonitoring(string matchId)
     {
         var rankedMatch = matchState.GetByMatchId(matchId);
@@ -38,6 +41,13 @@ public class MatchMonitorCoordinator(
                 matchId);
             return;
         }
+
+        _unnamedPlayersLogged.TryRemove(matchId, out _);
+
+        // Subscribe now rather than on the first tick: player names are only sent as players join
+        if (rankedMatch.EchoMatchInstance != null &&
+            TryGetSessionId(rankedMatch.EchoMatchInstance, matchId, "StartMonitoring", out var sessionId))
+            telemetry.EnsureSubscribed(sessionId);
 
         var cts = new CancellationTokenSource();
         matchState.UpdateMatch(matchId, m =>
@@ -300,7 +310,18 @@ public class MatchMonitorCoordinator(
         try
         {
             var (currentScores, _) = lifecycle.GetPlayerScoreFromPlayers(matchData);
-            if (currentScores.Count == 0) return;
+            if (currentScores.Count == 0)
+            {
+                var activePlayers = telemetry.GetActivePlayerCount(sessionId);
+                if (activePlayers > 0 && _unnamedPlayersLogged.TryAdd(matchId, 0))
+                {
+                    logger.LogWarning(
+                        "{LoopName}: Match {MatchId}, session {SessionId} has {PlayerCount} players but no player names, so the live scoreboard cannot be drawn. " +
+                        "The telemetry subscription started after they joined and nevr-stream did not replay the roster.",
+                        loopName, matchId, sessionId, activePlayers);
+                }
+                return;
+            }
 
             // Generate scoreboard image
             var templatePath = Path.Combine(AppContext.BaseDirectory, "Assets", "original.png");
@@ -415,6 +436,16 @@ public class MatchMonitorCoordinator(
                     "{LoopName}: No telemetry was received for match {MatchId}, session {SessionId} within 5 minutes. The match will no longer be monitored.",
                     loopName, matchId, sessionId);
                 lifecycle.StopMatchMonitoring(matchId, newInstance: true);
+                return;
+            }
+
+            // Players can be in the match without names when the subscription started after they joined
+            var activePlayers = telemetry.GetActivePlayerCount(sessionId);
+            if (activePlayers > 0)
+            {
+                logger.LogInformation("{PlayerCount} players are in match {MatchId}", activePlayers, matchId);
+                matchState.UpdateMatch(matchId, m => m.PrivateMatchDetails!.MatchStarting = false);
+                logger.LogInformation("{LoopName} exited normally for match {MatchId}", loopName, matchId);
                 return;
             }
 

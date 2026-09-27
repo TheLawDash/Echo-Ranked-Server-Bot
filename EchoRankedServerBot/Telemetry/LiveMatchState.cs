@@ -64,6 +64,12 @@ public sealed class LiveMatchState
     public bool HasData { get; private set; }
     public bool Ended { get; private set; }
 
+    /// <summary>
+    /// Blue and orange players in the latest frame, named or not. A subscriber that connected after players
+    /// joined has frames for them but no roster, so its snapshot has empty teams.
+    /// </summary>
+    public int ActivePlayerCount { get; private set; }
+
     public void Apply(Envelope envelope)
     {
         lock (_lock)
@@ -122,6 +128,7 @@ public sealed class LiveMatchState
             _orangePoints = arena.OrangePoints;
             _pauseState = arena.PauseState;
             _pauseDetail = arena.PauseDetail;
+            ActivePlayerCount = arena.Players.Count(p => ((p.Flags >> 5) & 0b11) <= 1);
 
             foreach (var ps in arena.Players)
                 _playerStates[ps.Slot] = ps;
@@ -288,7 +295,7 @@ public sealed class LiveMatchState
                 MapName = _mapName,
                 GameStatus = Ended ? "post_match" : GameStatusName(_gameStatus),
                 GameClock = _gameClock,
-                GameClockDisplay = _gameClockDisplay,
+                GameClockDisplay = FormatGameClock(),
                 BluePoints = _bluePoints,
                 OrangePoints = _orangePoints,
                 BlueRoundScore = _blueRoundScore,
@@ -362,6 +369,15 @@ public sealed class LiveMatchState
             1 => Role.OrangeTeam,
             _ => Role.Spectator
         };
+    }
+
+    // ScoreboardUpdated's display string only changes on a goal; every frame carries the clock itself.
+    private string FormatGameClock()
+    {
+        if (_gameStatus == GameStatus.Unspecified) return _gameClockDisplay;
+
+        var clock = TimeSpan.FromSeconds(Math.Max(0, _gameClock));
+        return $"{(int)clock.TotalMinutes:00}:{clock.Seconds:00}.{clock.Milliseconds / 10:00}";
     }
 
     private static bool IsRealGoal(GoalScored goal) =>

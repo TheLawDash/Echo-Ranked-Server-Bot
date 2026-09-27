@@ -36,6 +36,9 @@ public class LiveTelemetryService(
     public EchoVrApiSession? TryGetSnapshot(string sessionId) =>
         _subscriptions.TryGetValue(sessionId, out var subscription) ? subscription.State.ToSession() : null;
 
+    public int GetActivePlayerCount(string sessionId) =>
+        _subscriptions.TryGetValue(sessionId, out var subscription) ? subscription.State.ActivePlayerCount : 0;
+
     public void Stop(string sessionId)
     {
         if (!_subscriptions.TryRemove(sessionId, out var subscription)) return;
