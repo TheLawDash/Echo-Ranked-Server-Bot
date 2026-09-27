@@ -133,41 +133,7 @@ public class MatchCommandModule(
         }
         else
         {
-            var templatePath = Path.Combine(AppContext.BaseDirectory, "Assets", "original.png");
-            await using var fileStream = new FileStream(templatePath, FileMode.Open, FileAccess.Read);
-            var liveEmbed = new EmbedBuilder()
-                .WithColor(Color.Green)
-                .WithTitle($"Match for: {textChannel.Name}")
-                .AddField("Last updated at:", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:R>")
-                .WithImageUrl("attachment://original.png")
-                .WithFooter("Echo Ranked • Server Manager");
-
-            if (liveMessageId != null)
-            {
-                try
-                {
-                    if (await liveChannel.GetMessageAsync(liveMessageId.Value) is IUserMessage existingMsg)
-                    {
-                        await existingMsg.ModifyAsync(msg =>
-                        {
-                            msg.Embed = liveEmbed.Build();
-                            msg.Attachments = new[] { new FileAttachment(fileStream, "original.png") };
-                        });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "Could not modify the existing live match message {MessageId} for match {MatchId}, sending a new one instead.",
-                        liveMessageId.Value, rankedMatch.MatchId);
-                    var newMsg = await liveChannel.SendFileAsync(fileStream, "original.png", embed: liveEmbed.Build());
-                    liveMessageId = newMsg.Id;
-                }
-            }
-            else
-            {
-                var newMsg = await liveChannel.SendFileAsync(fileStream, "original.png", embed: liveEmbed.Build());
-                liveMessageId = newMsg.Id;
-            }
+            liveMessageId = await lifecycle.SendOrUpdateLiveMatchMessageAsync(liveChannel, textChannel.Name, liveMessageId);
         }
 
         matchState.UpdateMatch(rankedMatch.MatchId, m =>
@@ -310,8 +276,10 @@ public class MatchCommandModule(
             return;
         }
 
-        // Send live match message
-        ulong? liveMessageId = null;
+        if (rankedMatch.EchoMatchInstance != null)
+            lifecycle.StopMatchMonitoring(rankedMatch.MatchId, newInstance: true);
+
+        var liveMessageId = rankedMatch.PrivateMatchDetails?.LiveMatchMessageId;
         var liveChannel = discord.GetTextChannel(options.Value.LiveMatchesChannelId);
         if (liveChannel == null)
         {
@@ -320,16 +288,7 @@ public class MatchCommandModule(
         }
         else
         {
-            var templatePath = Path.Combine(AppContext.BaseDirectory, "Assets", "original.png");
-            await using var fileStream = new FileStream(templatePath, FileMode.Open, FileAccess.Read);
-            var embedBuilder = new EmbedBuilder()
-                .WithColor(Color.Green)
-                .WithTitle($"Match for: {textChannel.Name}")
-                .AddField("Last updated at:", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:R>")
-                .WithImageUrl("attachment://original.png")
-                .WithFooter("Echo Ranked • Server Manager");
-            var liveMsg = await liveChannel.SendFileAsync(fileStream, "original.png", embed: embedBuilder.Build());
-            liveMessageId = liveMsg.Id;
+            liveMessageId = await lifecycle.SendOrUpdateLiveMatchMessageAsync(liveChannel, textChannel.Name, liveMessageId);
         }
 
         matchState.UpdateMatch(rankedMatch.MatchId, m =>

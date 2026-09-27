@@ -99,6 +99,8 @@ public class SelectMenuHandler(
             var location = await lifecycle.GetServerLocationAsync(ip);
             var regionLabel = ServerDecisionService.GetRegionLabel(selectedMatch.Broadcaster.RegionCodes);
             var echoMatchId = lifecycle.GetMatchIdFromMatch(selectedMatch);
+            var sessionExpiry = DateTimeOffset.UtcNow.AddMinutes(5);
+            var sessionExpiryEpoch = sessionExpiry.ToUnixTimeSeconds();
 
             var embed = new EmbedBuilder()
                 .WithColor(Color.Green)
@@ -109,9 +111,9 @@ public class SelectMenuHandler(
                     $"Server Location: {location}\n\n" +
                     $"Selected Region: {regionLabel}\n\n" +
                     $"Please open echo, and click \"Play\" or go to a matchmaking terminal and hit \"Find Match\" to join!\n\n" +
-                    $"Your session will be held until: `{DateTime.Now.AddMinutes(5):hh:mm tt} EST`\n\n")
+                    $"Your session will be held until: <t:{sessionExpiryEpoch}:t> (<t:{sessionExpiryEpoch}:R>)\n\n")
                 .WithThumbnailUrl("https://cdn.discordapp.com/attachments/1230261297287794950/1230563467606360064/EchoRanked.png")
-                .WithFooter($"Today at {DateTime.Now.AddMinutes(5):hh:mm tt}")
+                .WithTimestamp(sessionExpiry)
                 .Build();
 
             if (component.Channel is SocketTextChannel textChannel)

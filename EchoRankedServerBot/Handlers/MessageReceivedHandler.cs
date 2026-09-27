@@ -79,6 +79,9 @@ public class MessageReceivedHandler(
                 return;
             }
 
+            if (rankedMatch.EchoMatchInstance != null)
+                lifecycle.StopMatchMonitoring(matchId, newInstance: true);
+
             var orange = embed.Fields[0].Value.Split(',');
             var blue = embed.Fields[1].Value.Split(',');
 
@@ -134,8 +137,8 @@ public class MessageReceivedHandler(
                 sparkLinkMessageId = null;
             }
 
-            // Send live match message with scoreboard template
-            ulong? liveMessageId = null;
+            // Reuse the queue's live match message if it still exists
+            var liveMessageId = rankedMatch.PrivateMatchDetails.LiveMatchMessageId;
             var liveChannel = discord.GetTextChannel(options.Value.LiveMatchesChannelId);
             if (liveChannel == null)
             {
@@ -143,23 +146,7 @@ public class MessageReceivedHandler(
             }
             else
             {
-                try
-                {
-                    var templatePath = Path.Combine(AppContext.BaseDirectory, "Assets", "original.png");
-                    await using var fileStream = new FileStream(templatePath, FileMode.Open, FileAccess.Read);
-                    var embedBuilder = new EmbedBuilder()
-                        .WithColor(Color.Green)
-                        .WithTitle($"Match for: {textChannel.Name}")
-                        .AddField("Last updated at:", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:R>")
-                        .WithImageUrl("attachment://original.png")
-                        .WithFooter("Echo Ranked • Server Manager");
-                    var liveMsg = await liveChannel.SendFileAsync(fileStream, "original.png", embed: embedBuilder.Build());
-                    liveMessageId = liveMsg.Id;
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex, "Failed to send the live match message to channel {ChannelId} for {ChannelName}, continuing without it", liveChannel.Id, textChannel.Name);
-                }
+                liveMessageId = await lifecycle.SendOrUpdateLiveMatchMessageAsync(liveChannel, textChannel.Name, liveMessageId);
             }
 
             // Update match state

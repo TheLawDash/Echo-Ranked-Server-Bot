@@ -11,7 +11,6 @@ public class NakamaOptions
     public string PrepareEndpoint { get; set; } = string.Empty;
     public string AssignEndpoint { get; set; } = string.Empty;
     public string StorageEndpoint { get; set; } = string.Empty;
-    public string StreamingEndpoint { get; set; } = string.Empty;
     public string ExcludedBroadcasterId { get; set; } = string.Empty;
 
     // Loaded from environment variables

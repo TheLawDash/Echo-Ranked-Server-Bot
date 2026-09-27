@@ -17,7 +17,7 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
     private const int PnGx = 877;
     private const int MvPx = 960;
 
-    // Y positions for each player slot (orange team: indices 0-3, blue team: indices 4-7)
+    // Y positions for each player slot (blue team: indices 0-3, orange team: indices 4-7)
     private static readonly int[] NameYs = [713, 785, 860, 935, 200, 270, 345, 420];
 
     public MemoryStream? GenerateScoreboardAsync(
@@ -82,7 +82,6 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
             paint.IsAntialias = true;
 
             // Draw player names and stats
-            var actualIndex = 0;
             var playerIndex = 0;
 
             foreach (var team in echoMatchData.Teams.Where(team => !string.Equals(team.TeamName, "SPECTATORS", StringComparison.OrdinalIgnoreCase)))
@@ -95,9 +94,10 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
 
                 try
                 {
-                    var teamDifference = 4 - team.Players.Count;
+                    var teamPlayers = team.Players.Take(4).ToList();
+                    var teamDifference = 4 - teamPlayers.Count;
 
-                    foreach (var player in team.Players.TakeWhile(_ => playerIndex < NameYs.Length))
+                    foreach (var player in teamPlayers.TakeWhile(_ => playerIndex < NameYs.Length))
                     {
                         font.Size = 32;
 
@@ -111,13 +111,13 @@ public class ScoreboardImageService(ILogger<ScoreboardImageService> logger)
 
                         // Draw MVP score with smaller font
                         font.Size = 24;
-                        if (actualIndex < playerScores.Count)
+                        var playerScore = playerScores.Find(x => x.Player?.UserId == player.UserId && x.Player?.Name == player.Name);
+                        if (playerScore is not null)
                         {
-                            DrawCenteredText(canvas, playerScores[actualIndex].Score.ToString("F1"), font, paint, MvPx, NameYs[playerIndex] + 5);
+                            DrawCenteredText(canvas, playerScore.Score.ToString("F1"), font, paint, MvPx, NameYs[playerIndex] + 5);
                         }
 
                         playerIndex++;
-                        actualIndex++;
                     }
 
                     playerIndex += teamDifference;

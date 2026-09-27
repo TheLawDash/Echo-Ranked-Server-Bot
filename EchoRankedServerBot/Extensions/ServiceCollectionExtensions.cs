@@ -6,6 +6,7 @@ using EchoRankedServerBot.Configuration;
 using EchoRankedServerBot.Data;
 using EchoRankedServerBot.Handlers;
 using EchoRankedServerBot.Services;
+using EchoRankedServerBot.Telemetry;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,7 @@ public static class ServiceCollectionExtensions
             o.HttpKey = DataConstants.EnvironmentVariables.EchoRankedNakamaHttpKey.GetAsEnvironmentVariable();
         });
         services.Configure<ApiOptions>(configuration.GetSection(ApiOptions.SectionName));
+        services.Configure<StreamingOptions>(configuration.GetSection(StreamingOptions.SectionName));
 
         // Database
         var connectionString = DataConstants.EnvironmentVariables.EchoRankedPostgresConnection.GetAsEnvironmentVariable();
@@ -60,6 +62,7 @@ public static class ServiceCollectionExtensions
         // HTTP clients
         services.AddHttpClient("Nakama");
         services.AddHttpClient("IpApi");
+        services.AddHttpClient("Streaming");
         services.AddHttpClient("NeatQueue", (_, httpClient) =>
         {
             var neatQueueApiKey = DataConstants.EnvironmentVariables.EchoRankedNeatQueueApiKey.GetAsEnvironmentVariable();
@@ -74,7 +77,7 @@ public static class ServiceCollectionExtensions
 
         // Services (scoped/transient)
         services.AddSingleton<NakamaApiService>();
-        services.AddSingleton<StreamingApiService>();
+        services.AddSingleton<LiveTelemetryService>();
         services.AddSingleton<IpGeolocationService>();
         services.AddSingleton<NeatQueueService>();
         services.AddSingleton<ServerDecisionService>();

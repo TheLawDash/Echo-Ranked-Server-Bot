@@ -4,6 +4,7 @@ using EchoRankedServerBot.Configuration;
 using EchoRankedServerBot.Models.EchoApi;
 using EchoRankedServerBot.Models.Match;
 using EchoRankedServerBot.Services;
+using EchoRankedServerBot.Telemetry;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -16,7 +17,7 @@ namespace EchoRankedServerBot.BackgroundServices;
 public class MatchMonitorCoordinator(
     MatchStateService matchState,
     MatchLifecycleService lifecycle,
-    StreamingApiService streamingApi,
+    LiveTelemetryService telemetry,
     NakamaApiService nakamaApi,
     StatsRepository statsRepo,
     NeatQueueService neatQueue,
@@ -39,7 +40,12 @@ public class MatchMonitorCoordinator(
         }
 
         var cts = new CancellationTokenSource();
-        matchState.UpdateMatch(matchId, m => m.MonitoringCts = cts);
+        matchState.UpdateMatch(matchId, m =>
+        {
+            // Never run two sets of loops for one match, which would record its stats twice
+            m.MonitoringCts?.Cancel();
+            m.MonitoringCts = cts;
+        });
 
         _ = RunMainTransitionLoopAsync(matchId, cts.Token);
         _ = RunStatCheckLoopAsync(matchId, cts.Token);
@@ -135,25 +141,25 @@ public class MatchMonitorCoordinator(
         }
         if (rankedMatch.EchoMatchInstance.PostingStats) return;
 
+        if (!TryGetSessionId(rankedMatch.EchoMatchInstance, matchId, loopName, out var sessionId))
+            return;
+
+        // No data yet means the server has not started streaming; the join check handles no-shows
+        var echoMatch = GetTelemetry(sessionId);
+        if (echoMatch == null)
+        {
+            logger.LogDebug(
+                "{LoopName}: No telemetry yet for match {MatchId}, session {SessionId}, skipping tick",
+                loopName, matchId, sessionId);
+            return;
+        }
+
         var token = await nakamaApi.GetNakamaTokenAsync();
         if (token == null)
         {
             logger.LogWarning(
                 "{LoopName}: Failed to retrieve Nakama token for match {MatchId}, skipping tick",
                 loopName, matchId);
-            return;
-        }
-
-        if (!TryGetSessionId(rankedMatch.EchoMatchInstance, matchId, loopName, out var sessionId))
-            return;
-
-        var echoMatch = await streamingApi.GetEchoApiFromStreamingAsync(sessionId, token);
-        if (echoMatch == null)
-        {
-            logger.LogWarning(
-                "{LoopName}: Streaming API returned no data for match {MatchId}, session {SessionId}. The match will no longer be monitored.",
-                loopName, matchId, sessionId);
-            lifecycle.StopMatchMonitoring(matchId);
             return;
         }
 
@@ -220,7 +226,7 @@ public class MatchMonitorCoordinator(
                     }
                 }
 
-                lifecycle.StopMatchMonitoring(matchId);
+                lifecycle.StopMatchMonitoring(matchId, newInstance: true);
             }
         }
         catch (Exception ex)
@@ -279,30 +285,21 @@ public class MatchMonitorCoordinator(
             return;
         }
 
-        var token = await nakamaApi.GetNakamaTokenAsync();
-        if (token == null)
-        {
-            logger.LogWarning(
-                "{LoopName}: Failed to retrieve Nakama token for match {MatchId}, skipping tick",
-                loopName, matchId);
-            return;
-        }
-
         if (!TryGetSessionId(rankedMatch.EchoMatchInstance, matchId, loopName, out var sessionId))
             return;
 
-        var matchData = await streamingApi.GetEchoApiFromStreamingAsync(sessionId, token);
+        var matchData = GetTelemetry(sessionId);
         if (matchData == null)
         {
-            logger.LogWarning(
-                "{LoopName}: Streaming API returned no data for match {MatchId}, session {SessionId}, skipping tick",
+            logger.LogDebug(
+                "{LoopName}: No telemetry yet for match {MatchId}, session {SessionId}, skipping tick",
                 loopName, matchId, sessionId);
             return;
         }
 
         try
         {
-            var currentScores = rankedMatch.EchoMatchInstance.PlayerScores;
+            var (currentScores, _) = lifecycle.GetPlayerScoreFromPlayers(matchData);
             if (currentScores.Count == 0) return;
 
             // Generate scoreboard image
@@ -339,6 +336,9 @@ public class MatchMonitorCoordinator(
             var embedBuilder = new EmbedBuilder()
                 .WithColor(Color.Green)
                 .WithTitle($"Match for: {queueName}")
+                .WithDescription(FormatGameStatus(matchData))
+                .AddField("Score:", $"Blue {matchData.BluePoints ?? 0} - {matchData.OrangePoints ?? 0} Orange", true)
+                .AddField("Rounds:", $"Blue {matchData.BlueRoundScore ?? 0} - {matchData.OrangeRoundScore ?? 0} Orange", true)
                 .AddField("Last updated at:", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:R>")
                 .WithImageUrl($"attachment://{matchId}.png")
                 .WithFooter("Echo Ranked • Server Manager");
@@ -405,24 +405,16 @@ public class MatchMonitorCoordinator(
                 return;
             }
 
-            var token = await nakamaApi.GetNakamaTokenAsync();
-            if (token == null)
-            {
-                logger.LogWarning(
-                    "{LoopName}: Failed to retrieve Nakama token for match {MatchId}, skipping check",
-                    loopName, matchId);
-                return;
-            }
-
             if (!TryGetSessionId(rankedMatch.EchoMatchInstance, matchId, loopName, out var sessionId))
                 return;
 
-            var echoVr = await streamingApi.GetEchoApiFromStreamingAsync(sessionId, token);
+            var echoVr = GetTelemetry(sessionId);
             if (echoVr?.Teams == null)
             {
                 logger.LogWarning(
-                    "{LoopName}: Streaming API returned no team data for match {MatchId}, session {SessionId}, skipping check",
+                    "{LoopName}: No telemetry was received for match {MatchId}, session {SessionId} within 5 minutes. The match will no longer be monitored.",
                     loopName, matchId, sessionId);
+                lifecycle.StopMatchMonitoring(matchId, newInstance: true);
                 return;
             }
 
@@ -444,7 +436,7 @@ public class MatchMonitorCoordinator(
             logger.LogWarning(
                 "{LoopName}: No players joined match {MatchId} within 5 minutes. The match will no longer be monitored.",
                 loopName, matchId);
-            lifecycle.StopMatchMonitoring(matchId);
+            lifecycle.StopMatchMonitoring(matchId, newInstance: true);
             logger.LogInformation("{LoopName} exited normally for match {MatchId}", loopName, matchId);
         }
         catch (OperationCanceledException)
@@ -458,7 +450,7 @@ public class MatchMonitorCoordinator(
             logger.LogError(ex,
                 "{LoopName} for match {MatchId} stopped because of an unexpected error. The match is no longer being monitored.",
                 loopName, matchId);
-            lifecycle.StopMatchMonitoring(matchId);
+            lifecycle.StopMatchMonitoring(matchId, newInstance: true);
         }
     }
 
@@ -486,6 +478,7 @@ public class MatchMonitorCoordinator(
                 logger.LogWarning(
                     "GetListOfPlayersAsync: Failed to retrieve Nakama matches for match {MatchId}, player details were not updated.",
                     matchId);
+                AddPlayersFromPreviousTick(details, playerList, rankedMatch.EchoMatchInstance);
                 return (details, echoMatch.LastScore);
             }
 
@@ -496,10 +489,9 @@ public class MatchMonitorCoordinator(
                 logger.LogWarning(
                     "GetListOfPlayersAsync: No Nakama match found for broadcaster {BroadcasterId} in match {MatchId}, player details were not updated.",
                     rankedMatch.EchoMatchInstance.BroadcasterId, matchId);
+                AddPlayersFromPreviousTick(details, playerList, rankedMatch.EchoMatchInstance);
                 return (details, echoMatch.LastScore);
             }
-
-            var currentPlayers = rankedMatch.EchoMatchInstance.PlayerDetails;
 
             foreach (var nakamaPlayer in wantedMatch.Players)
             {
@@ -507,53 +499,13 @@ public class MatchMonitorCoordinator(
                 {
                     try
                     {
-                        if (!nakamaPlayer.EvrId.Contains(apiPlayer.UserId.ToString()!, StringComparison.OrdinalIgnoreCase))
+                        if (!IsSameAccount(nakamaPlayer.EvrId, apiPlayer.UserId))
                             continue;
 
                         var isOrangeTeam = echoMatch.Teams?[1].Players?.Any(x => x.UserId == apiPlayer.UserId) ?? false;
                         var team = isOrangeTeam ? "orange" : "blue";
 
                         apiPlayer.Stats ??= new PlayerStats();
-
-                        // Carry over accumulated stats from previous ticks
-                        var existing = currentPlayers.Find(x =>
-                            x.EvrId != null && x.EvrId.Contains(apiPlayer.UserId.ToString()!, StringComparison.OrdinalIgnoreCase));
-                        if (existing?.Player?.Stats != null)
-                        {
-                            apiPlayer.Stats.TwoPointShots = existing.Player.Stats.TwoPointShots;
-                            apiPlayer.Stats.ThreePointShots = existing.Player.Stats.ThreePointShots;
-                            apiPlayer.Stats.ShortBounceShots = existing.Player.Stats.ShortBounceShots;
-                            apiPlayer.Stats.LongBounceShots = existing.Player.Stats.LongBounceShots;
-                            apiPlayer.Stats.ThrowDistance = existing.Player.Stats.ThrowDistance;
-                            apiPlayer.Stats.ShotSpeed = existing.Player.Stats.ShotSpeed;
-
-                            if (echoMatch.LastScore != null
-                                && echoMatch.LastScore != rankedMatch.EchoMatchInstance.LastScore
-                                && echoMatch.LastScore.PersonScored == apiPlayer.Name)
-                            {
-                                apiPlayer.Stats.ShotSpeed.Add(echoMatch.LastScore.DiscSpeed);
-                                apiPlayer.Stats.ThrowDistance.Add(echoMatch.LastScore.DistanceThrown);
-
-                                var goalType = echoMatch.LastScore.GoalType ?? "";
-                                if (goalType.Contains("bounce", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    if (!goalType.Contains("long", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        apiPlayer.Stats.TwoPointShots += 1;
-                                        apiPlayer.Stats.ShortBounceShots += 1;
-                                    }
-                                    else
-                                    {
-                                        apiPlayer.Stats.ThreePointShots += 1;
-                                        apiPlayer.Stats.LongBounceShots += 1;
-                                    }
-                                }
-                                if (goalType.Contains("Long", StringComparison.OrdinalIgnoreCase) && !goalType.Contains("Bounce", StringComparison.OrdinalIgnoreCase))
-                                    apiPlayer.Stats.ThreePointShots += 1;
-                                if (goalType.Contains("Two", StringComparison.OrdinalIgnoreCase) && !goalType.Contains("Bounce", StringComparison.OrdinalIgnoreCase))
-                                    apiPlayer.Stats.TwoPointShots += 1;
-                            }
-                        }
 
                         var guild = client.GetGuild(options.Value.GuildId);
                         if (guild == null)
@@ -624,7 +576,53 @@ public class MatchMonitorCoordinator(
             logger.LogError(ex, "Error in GetListOfPlayersAsync for {MatchId}", matchId);
         }
 
+        AddPlayersFromPreviousTick(details, playerList, rankedMatch.EchoMatchInstance);
         return (details, echoMatch.LastScore);
+    }
+
+    private static void AddPlayersFromPreviousTick(List<DiscordPlayerDetails> details, List<Player> playerList, EchoMatchInstance instance)
+    {
+        foreach (var apiPlayer in playerList)
+        {
+            if (details.Any(d => d.Player?.UserId == apiPlayer.UserId)) continue;
+
+            var previous = instance.PlayerDetails.Find(d => IsSameAccount(d.EvrId, apiPlayer.UserId));
+            if (previous == null) continue;
+
+            previous.Player = apiPlayer;
+            details.Add(previous);
+        }
+    }
+
+    private EchoVrApiSession? GetTelemetry(string sessionId)
+    {
+        telemetry.EnsureSubscribed(sessionId);
+        return telemetry.TryGetSnapshot(sessionId);
+    }
+
+    private static bool IsSameAccount(string? evrId, long? accountNumber)
+    {
+        if (string.IsNullOrEmpty(evrId) || accountNumber == null) return false;
+
+        var dash = evrId.LastIndexOf('-');
+        return long.TryParse(dash >= 0 ? evrId[(dash + 1)..] : evrId, out var id) && id == accountNumber;
+    }
+
+    private static string FormatGameStatus(EchoVrApiSession session)
+    {
+        var status = session.GameStatus switch
+        {
+            "pre_match" => "Waiting to start",
+            "round_start" => "Round starting",
+            "playing" => "In play",
+            "score" => "Goal scored",
+            "round_over" => "Round over",
+            "post_match" => "Match over",
+            "pre_sudden_death" or "sudden_death" or "post_sudden_death" => "Overtime",
+            _ => "Waiting for server"
+        };
+
+        return string.IsNullOrEmpty(session.GameClockDisplay) ? status : $"{status} • {session.GameClockDisplay}";
     }
 
     private string GetQueueName(EchoMatch match)

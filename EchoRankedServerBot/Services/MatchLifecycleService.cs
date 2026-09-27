@@ -5,6 +5,7 @@ using EchoRankedServerBot.Models.EchoApi;
 using EchoRankedServerBot.Models.Match;
 using EchoRankedServerBot.Models.Nakama;
 using EchoRankedServerBot.Models.Stats;
+using EchoRankedServerBot.Telemetry;
 using Microsoft.Extensions.Logging;
 
 namespace EchoRankedServerBot.Services;
@@ -15,6 +16,7 @@ public class MatchLifecycleService(
     ServerDecisionService decision,
     MatchStateService matchState,
     DiscordChannelService discord,
+    LiveTelemetryService telemetry,
     ILogger<MatchLifecycleService> logger)
 {
     /// <summary>
@@ -505,8 +507,8 @@ public class MatchLifecycleService(
     {
         try
         {
-            const string format = "hh:mm tt";
-            var sessionExpiry = DateTime.Now.AddMinutes(5).ToString(format);
+            var sessionExpiry = DateTimeOffset.UtcNow.AddMinutes(5);
+            var sessionExpiryEpoch = sessionExpiry.ToUnixTimeSeconds();
 
             var regionInfo = string.IsNullOrWhiteSpace(decidedRegion)
                 ? string.Empty
@@ -531,9 +533,9 @@ public class MatchLifecycleService(
                     regionInfo +
                     latencyInfo +
                     $"Please open echo, and click \"Play\" or go to a matchmaking terminal and hit \"Find Match\" to join!\n\n" +
-                    $"Your session will be held until: `{sessionExpiry} EST`\n\n")
+                    $"Your session will be held until: <t:{sessionExpiryEpoch}:t> (<t:{sessionExpiryEpoch}:R>)\n\n")
                 .WithThumbnailUrl("https://cdn.discordapp.com/attachments/1230261297287794950/1230563467606360064/EchoRanked.png")
-                .WithFooter($"Today at {sessionExpiry}")
+                .WithTimestamp(sessionExpiry)
                 .Build();
 
             if (update && existingMessageId.HasValue)
@@ -556,19 +558,71 @@ public class MatchLifecycleService(
     }
 
     /// <summary>
+    /// Resets the queue's live match message to the blank scoreboard template, editing the existing
+    /// message when it still exists and sending a new one otherwise. Returns the message id.
+    /// </summary>
+    public async Task<ulong?> SendOrUpdateLiveMatchMessageAsync(SocketTextChannel liveChannel, string queueName, ulong? existingMessageId)
+    {
+        var templatePath = Path.Combine(AppContext.BaseDirectory, "Assets", "original.png");
+        var embed = new EmbedBuilder()
+            .WithColor(Color.Green)
+            .WithTitle($"Match for: {queueName}")
+            .AddField("Last updated at:", $"<t:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}:R>")
+            .WithImageUrl("attachment://original.png")
+            .WithFooter("Echo Ranked • Server Manager")
+            .Build();
+
+        if (existingMessageId != null)
+        {
+            try
+            {
+                if (await liveChannel.GetMessageAsync(existingMessageId.Value) is IUserMessage existingMessage)
+                {
+                    await using var fileStream = new FileStream(templatePath, FileMode.Open, FileAccess.Read);
+                    await existingMessage.ModifyAsync(msg =>
+                    {
+                        msg.Embed = embed;
+                        msg.Attachments = new[] { new FileAttachment(fileStream, "original.png") };
+                    });
+                    return existingMessage.Id;
+                }
+
+                logger.LogInformation("Live match message {MessageId} for {QueueName} no longer exists, sending a new one",
+                    existingMessageId.Value, queueName);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Could not modify the existing live match message {MessageId} for {QueueName}, sending a new one instead",
+                    existingMessageId.Value, queueName);
+            }
+        }
+
+        try
+        {
+            await using var fileStream = new FileStream(templatePath, FileMode.Open, FileAccess.Read);
+            var message = await liveChannel.SendFileAsync(fileStream, "original.png", embed: embed);
+            return message.Id;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to send the live match message to channel {ChannelId} for {QueueName}", liveChannel.Id, queueName);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Sends an error embed indicating the server could not be pulled.
     /// </summary>
     public async Task SendServerPullErrorAsync(SocketTextChannel channel)
     {
         try
         {
-            const string format = "hh:mm tt";
             var embed = new EmbedBuilder()
                 .WithColor(Color.Red)
                 .WithTitle("There was an error pulling the server!")
                 .WithDescription("Please pull your own server for this match.")
                 .WithThumbnailUrl("https://cdn.discordapp.com/attachments/1230261297287794950/1230563467606360064/EchoRanked.png")
-                .WithFooter($"Today at {DateTime.Now.AddMinutes(5).ToString(format)}")
+                .WithCurrentTimestamp()
                 .Build();
 
             await channel.SendMessageAsync(embed: embed);
@@ -594,6 +648,12 @@ public class MatchLifecycleService(
                 logger.LogWarning("StopMatchMonitoring: No ranked match found with ID {MatchId}", matchId);
                 return false;
             }
+
+            var sessionId = rankedMatch.EchoMatchInstance?.SessionId;
+            if (string.IsNullOrEmpty(sessionId))
+                sessionId = rankedMatch.EchoMatchInstance?.BroadcasterId.Split('.')[0];
+            if (!string.IsNullOrEmpty(sessionId))
+                telemetry.Stop(sessionId);
 
             try
             {
