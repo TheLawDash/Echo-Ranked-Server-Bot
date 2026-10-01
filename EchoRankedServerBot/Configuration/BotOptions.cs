@@ -28,4 +28,5 @@ public class BotOptions
     public string OmahaRegionCode { get; set; } = string.Empty;
     public string PgvDcCevrRegionCode { get; set; } = string.Empty;
     public string ScoreboardFontPath { get; set; } = string.Empty;
+    public ScoreboardLayout ScoreboardLayout { get; set; } = ScoreboardLayout.Classic;
 }

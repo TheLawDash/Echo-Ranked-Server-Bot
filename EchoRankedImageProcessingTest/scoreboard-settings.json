@@ -1,0 +1,12 @@
+{
+  "Bot": {
+    "ScoreboardFontPath": "C:\\Users\\User\\Downloads\\conthrax-sb (1).ttf",
+    "ScoreboardLayout": "Framed"
+  },
+  "ImageTest": {
+    "TemplatePath": "Assets/original2.png",
+    "OutputPath": "Assets/output.png",
+    "OrangeRoundScore": 1,
+    "BlueRoundScore": 2
+  }
+}

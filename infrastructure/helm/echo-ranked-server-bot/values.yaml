@@ -11,7 +11,7 @@ imagePullSecrets:
 fullnameOverride: echo-ranked-server-bot
 
 # Font file on the bot's data volume; the scoreboard falls back to Arial when it is missing
-scoreboardFontPath: /app/data/fonts/GoodTimes.otf
+scoreboardFontPath: /app/data/fonts/EchoStencil.ttf
 
 serviceAccount:
   create: true

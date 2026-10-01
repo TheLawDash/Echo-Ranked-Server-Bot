@@ -4,6 +4,13 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EchoRankedServerBot", "Echo
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EchoTelemetryCli", "EchoTelemetryCli\EchoTelemetryCli.csproj", "{3ECC1EDF-3A3E-4554-B0F0-45836B61E10D}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "EchoRankedImageProcessingTest", "EchoRankedImageProcessingTest\EchoRankedImageProcessingTest.csproj", "{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{5F7D52FC-3968-4F0D-98C9-3FEEF0B0E3A7}"
+	ProjectSection(SolutionItems) = preProject
+		compose.yaml = compose.yaml
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -38,6 +45,18 @@ Global
 		{3ECC1EDF-3A3E-4554-B0F0-45836B61E10D}.Release|x64.Build.0 = Release|Any CPU
 		{3ECC1EDF-3A3E-4554-B0F0-45836B61E10D}.Release|x86.ActiveCfg = Release|Any CPU
 		{3ECC1EDF-3A3E-4554-B0F0-45836B61E10D}.Release|x86.Build.0 = Release|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Debug|x64.Build.0 = Debug|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Debug|x86.Build.0 = Debug|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Release|x64.ActiveCfg = Release|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Release|x64.Build.0 = Release|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Release|x86.ActiveCfg = Release|Any CPU
+		{414C77EE-E77F-4329-BFFB-2A0CDBF75F3E}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

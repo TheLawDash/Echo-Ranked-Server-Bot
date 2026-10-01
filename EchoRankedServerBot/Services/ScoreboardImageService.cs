@@ -11,25 +11,36 @@ public class ScoreboardImageService(IOptions<BotOptions> options, ILogger<Scoreb
 {
     private readonly Lazy<SKTypeface> _typeface = new(() => LoadTypeface(options.Value.ScoreboardFontPath, logger));
 
-    // Column center X positions
-    private const int NameCenterX = 225;
-    private const int PtSx = 450;
-    private const int AsTx = 540;
-    private const int Sx = 625;
-    private const int StLx = 710;
-    private const int StNx = 795;
-    private const int PnGx = 877;
-    private const int MvPx = 960;
+    private static readonly SKPoint[] FramedRoundWinCenters = [new(425, 557.5f), new(511.5f, 557.5f), new(598, 557.5f)];
 
-    private const float NameMaxWidth = 340;
-    private const float StatMaxWidth = 76;
-    private const float ScoreMaxWidth = 110;
-    private const float ClockMaxWidth = 250;
-    private const float MvpNameMaxWidth = 500;
-    private const float MvpScoreMaxWidth = 225;
+    // Coordinates for the 1024px templates; blue rows precede orange rows.
+    private static readonly ScoreboardRegions ClassicRegions = new(
+        [45, 405, 498, 585, 670, 757, 839, 921, 999],
+        [(703, 765), (773, 839), (848, 911), (920, 991),
+         (193, 251), (260, 328), (337, 399), (408, 479)],
+        new(135, 60, 630, 109), new(770, 60, 994, 109),
+        new(80, 528, 246, 611), new(792, 528, 958, 611),
+        new(390, 498, 639, 570),
+        new(287, 520, 371, 611), new(657, 520, 747, 611));
 
-    // Y positions for each player slot (blue team: indices 0-3, orange team: indices 4-7)
-    private static readonly int[] NameYs = [713, 785, 860, 935, 200, 270, 345, 420];
+    private static readonly ScoreboardRegions FramedRegions = new(
+        [76, 384, 478, 569, 653, 740, 828, 915, 1006],
+        [(670, 738), (745, 814), (821, 890), (897, 966),
+         (180, 238), (245, 303), (310, 367), (374, 432)],
+        new(184, 52, 435, 102), new(784, 52, 984, 102),
+        new(36, 512, 217, 569), new(805, 512, 987, 569),
+        new(389, 481, 635, 535),
+        new(256, 512, 351, 569), new(674, 512, 769, 569));
+
+    private sealed record ScoreboardRegions(
+        float[] ColumnEdges, (float Top, float Bottom)[] Rows,
+        SKRect MvpName, SKRect MvpScore, SKRect OrangeScore, SKRect BlueScore,
+        SKRect Clock, SKRect OrangeRounds, SKRect BlueRounds)
+    {
+        public SKRect PlayerCell(int row, int column) => new(
+            ColumnEdges[column] + 8, Rows[row].Top + 8,
+            ColumnEdges[column + 1] - 8, Rows[row].Bottom - 8);
+    }
 
     public MemoryStream? GenerateScoreboardAsync(
         string templatePath,
@@ -76,6 +87,7 @@ public class ScoreboardImageService(IOptions<BotOptions> options, ILogger<Scoreb
             }
 
             using var canvas = new SKCanvas(bitmap);
+            var regions = options.Value.ScoreboardLayout == ScoreboardLayout.Framed ? FramedRegions : ClassicRegions;
 
             using var font = new SKFont(_typeface.Value, 32);
             using var paint = new SKPaint();
@@ -98,24 +110,20 @@ public class ScoreboardImageService(IOptions<BotOptions> options, ILogger<Scoreb
                     var teamPlayers = team.Players.Take(4).ToList();
                     var teamDifference = 4 - teamPlayers.Count;
 
-                    foreach (var player in teamPlayers.TakeWhile(_ => playerIndex < NameYs.Length))
+                    foreach (var player in teamPlayers.TakeWhile(_ => playerIndex < regions.Rows.Length))
                     {
-                        font.Size = 32;
+                        DrawTextInBox(canvas, player.Name ?? "", font, paint, regions.PlayerCell(playerIndex, 0), 32);
+                        DrawTextInBox(canvas, player.Stats?.Points.ToString() ?? "0", font, paint, regions.PlayerCell(playerIndex, 1), 32);
+                        DrawTextInBox(canvas, player.Stats?.Assists.ToString() ?? "0", font, paint, regions.PlayerCell(playerIndex, 2), 32);
+                        DrawTextInBox(canvas, player.Stats?.Saves.ToString() ?? "0", font, paint, regions.PlayerCell(playerIndex, 3), 32);
+                        DrawTextInBox(canvas, player.Stats?.Steals.ToString() ?? "0", font, paint, regions.PlayerCell(playerIndex, 4), 32);
+                        DrawTextInBox(canvas, player.Stats?.Stuns.ToString() ?? "0", font, paint, regions.PlayerCell(playerIndex, 5), 32);
+                        DrawTextInBox(canvas, player.Ping?.ToString() ?? "0", font, paint, regions.PlayerCell(playerIndex, 6), 32);
 
-                        DrawCenteredText(canvas, player.Name ?? "", font, paint, NameCenterX, NameYs[playerIndex], NameMaxWidth);
-                        DrawCenteredText(canvas, player.Stats?.Points.ToString() ?? "0", font, paint, PtSx, NameYs[playerIndex], StatMaxWidth);
-                        DrawCenteredText(canvas, player.Stats?.Assists.ToString() ?? "0", font, paint, AsTx, NameYs[playerIndex], StatMaxWidth);
-                        DrawCenteredText(canvas, player.Stats?.Saves.ToString() ?? "0", font, paint, Sx, NameYs[playerIndex], StatMaxWidth);
-                        DrawCenteredText(canvas, player.Stats?.Steals.ToString() ?? "0", font, paint, StLx, NameYs[playerIndex], StatMaxWidth);
-                        DrawCenteredText(canvas, player.Stats?.Stuns.ToString() ?? "0", font, paint, StNx, NameYs[playerIndex], StatMaxWidth);
-                        DrawCenteredText(canvas, player.Ping?.ToString() ?? "0", font, paint, PnGx, NameYs[playerIndex], StatMaxWidth);
-
-                        // Draw MVP score with smaller font
-                        font.Size = 24;
                         var playerScore = playerScores.Find(x => x.Player?.UserId == player.UserId && x.Player?.Name == player.Name);
                         if (playerScore is not null)
                         {
-                            DrawCenteredText(canvas, playerScore.Score.ToString("F1"), font, paint, MvPx, NameYs[playerIndex] + 5, StatMaxWidth);
+                            DrawTextInBox(canvas, playerScore.Score.ToString("F1"), font, paint, regions.PlayerCell(playerIndex, 7), 24);
                         }
 
                         playerIndex++;
@@ -130,35 +138,34 @@ public class ScoreboardImageService(IOptions<BotOptions> options, ILogger<Scoreb
             }
 
             // Draw team scores
-            font.Size = 62;
-            DrawCenteredText(canvas, echoMatchData.OrangePoints?.ToString() ?? "0", font, paint, 165, 535, ScoreMaxWidth);
-            DrawCenteredText(canvas, echoMatchData.BluePoints?.ToString() ?? "0", font, paint, 875, 535, ScoreMaxWidth);
+            DrawTextInBox(canvas, echoMatchData.OrangePoints?.ToString() ?? "0", font, paint, regions.OrangeScore, 62);
+            DrawTextInBox(canvas, echoMatchData.BluePoints?.ToString() ?? "0", font, paint, regions.BlueScore, 62);
 
             // Draw game clock or "GAME OVER"
-            font.Size = 36;
             if (echoMatchData.GameStatus == "post_match")
             {
-                DrawCenteredText(canvas, "GAME OVER", font, paint, 515, 515, ClockMaxWidth);
+                DrawTextInBox(canvas, "GAME OVER", font, paint, regions.Clock, 36);
             }
             else
             {
-                DrawCenteredText(canvas, echoMatchData.GameClockDisplay ?? "00:00", font, paint, 515, 515, ClockMaxWidth);
+                DrawTextInBox(canvas, echoMatchData.GameClockDisplay ?? "00:00", font, paint, regions.Clock, 36);
             }
 
             // Draw MVP name and score
-            font.Size = 36;
             var mvp = playerScores.OrderByDescending(p => p.Score).FirstOrDefault()?.Player;
             if (mvp is not null)
             {
                 var mvpScoreEntry = playerScores.Find(x => x.Player?.Name == mvp.Name);
-                DrawText(canvas, mvp.Name ?? "", font, paint, 135, 63, MvpNameMaxWidth);
-                DrawText(canvas, mvpScoreEntry?.Score.ToString("F3") ?? "0.000", font, paint, 770, 66, MvpScoreMaxWidth);
+                DrawTextInBox(canvas, mvp.Name ?? "", font, paint, regions.MvpName, 36);
+                DrawTextInBox(canvas, mvpScoreEntry?.Score.ToString("F3") ?? "0.000", font, paint, regions.MvpScore, 36);
             }
 
             // Draw round scores
-            font.Size = 62;
-            DrawText(canvas, echoMatchData.OrangeRoundScore?.ToString() ?? "0", font, paint, 300, 535, 70);
-            DrawText(canvas, echoMatchData.BlueRoundScore?.ToString() ?? "0", font, paint, 675, 535, 70);
+            DrawTextInBox(canvas, echoMatchData.OrangeRoundScore?.ToString() ?? "0", font, paint, regions.OrangeRounds, 62);
+            DrawTextInBox(canvas, echoMatchData.BlueRoundScore?.ToString() ?? "0", font, paint, regions.BlueRounds, 62);
+
+            if (options.Value.ScoreboardLayout == ScoreboardLayout.Framed)
+                DrawRoundWins(canvas, echoMatchData.OrangeRoundScore, echoMatchData.BlueRoundScore);
 
             // Encode to PNG MemoryStream
             using var image = SKImage.FromBitmap(bitmap);
@@ -192,21 +199,54 @@ public class ScoreboardImageService(IOptions<BotOptions> options, ILogger<Scoreb
         }
     }
 
-    private static void DrawText(SKCanvas canvas, string text, SKFont font, SKPaint paint, float x, int top, float maxWidth, bool centered = false)
+    private static void DrawRoundWins(SKCanvas canvas, int? orangeRoundScore, int? blueRoundScore)
     {
-        var size = font.Size;
-        while (font.MeasureText(text) > maxWidth && font.Size > 10)
-            font.Size -= 1;
+        var orangeWins = Math.Clamp(orangeRoundScore ?? 0, 0, FramedRoundWinCenters.Length);
+        var blueWins = Math.Clamp(blueRoundScore ?? 0, 0, FramedRoundWinCenters.Length - orangeWins);
+        using var paint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
 
-        var width = font.MeasureText(text);
-        var left = centered ? x - width / 2 : x;
-        var shrunkTop = top + (size - font.Size) / 2;
-        canvas.DrawText(text, left, shrunkTop - font.Metrics.Ascent, SKTextAlign.Left, font, paint);
-        font.Size = size;
+        // Team totals are available, so fill from each team's side rather than implying round order.
+        for (var index = 0; index < FramedRoundWinCenters.Length; index++)
+        {
+            if (index < orangeWins)
+                paint.Color = new SKColor(255, 145, 0);
+            else if (index >= FramedRoundWinCenters.Length - blueWins)
+                paint.Color = new SKColor(0, 174, 239);
+            else
+                continue;
+
+            // Leave the template's outline visible around the colored interior.
+            canvas.DrawCircle(FramedRoundWinCenters[index], 14, paint);
+        }
     }
 
-    private static void DrawCenteredText(SKCanvas canvas, string text, SKFont font, SKPaint paint, int centerX, int top, float maxWidth) =>
-        DrawText(canvas, text, font, paint, centerX, top, maxWidth, centered: true);
+    private static void DrawTextInBox(SKCanvas canvas, string text, SKFont font, SKPaint paint, SKRect area, float size)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        font.Size = size;
+        font.MeasureText(text, out var bounds, paint);
+        while ((bounds.Width > area.Width || bounds.Height > area.Height) && font.Size > 1)
+        {
+            font.Size -= 1;
+            font.MeasureText(text, out bounds, paint);
+        }
+
+        // Center the visible glyphs, including fonts with unusual bearings/ascent.
+        var x = area.MidX - bounds.MidX;
+        var baseline = area.MidY - bounds.MidY;
+        canvas.Save();
+        try
+        {
+            canvas.ClipRect(area);
+            canvas.DrawText(text, x, baseline, SKTextAlign.Left, font, paint);
+        }
+        finally
+        {
+            canvas.Restore();
+        }
+    }
 
     private static SKTypeface LoadTypeface(string fontPath, ILogger logger)
     {
