@@ -19,6 +19,10 @@ public class EchoVrApiSession
     [JsonPropertyName("game_status")]
     public string? GameStatus { get; set; }
 
+    // Transport completion is independent of whether the game actually finished.
+    [JsonIgnore]
+    public bool TelemetryEnded { get; set; }
+
     [JsonPropertyName("sessionip")]
     public string? SessionIp { get; set; }
 

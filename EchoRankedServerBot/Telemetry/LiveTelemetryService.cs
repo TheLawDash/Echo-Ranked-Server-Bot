@@ -43,7 +43,14 @@ public class LiveTelemetryService(
     {
         if (!_subscriptions.TryRemove(sessionId, out var subscription)) return;
 
-        subscription.Cts.Cancel();
+        try
+        {
+            subscription.Cts.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The stream loop may already have ended and disposed its cancellation source.
+        }
         logger.LogInformation("Stopped telemetry subscription for session {SessionId}", sessionId);
     }
 

@@ -51,6 +51,7 @@ public sealed class LiveMatchState
     private int _totalRoundCount;
 
     private GameStatus _gameStatus;
+    private bool _matchEnded;
     private float _gameClock;
     private string _gameClockDisplay = "";
     private int _bluePoints;
@@ -203,6 +204,7 @@ public sealed class LiveMatchState
                 ApplyGoal(evt.PlayerGoal, goalScored);
                 break;
             case EchoEvent.EventOneofCase.MatchEnded:
+                _matchEnded = true;
                 Ended = true;
                 break;
         }
@@ -293,7 +295,8 @@ public sealed class LiveMatchState
             {
                 SessionId = _sessionId,
                 MapName = _mapName,
-                GameStatus = Ended ? "post_match" : GameStatusName(_gameStatus),
+                GameStatus = _matchEnded ? "post_match" : GameStatusName(_gameStatus),
+                TelemetryEnded = Ended,
                 GameClock = _gameClock,
                 GameClockDisplay = FormatGameClock(),
                 BluePoints = _bluePoints,

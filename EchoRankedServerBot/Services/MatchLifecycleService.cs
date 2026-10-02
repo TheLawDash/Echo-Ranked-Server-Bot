@@ -452,13 +452,15 @@ public class MatchLifecycleService(
     }
 
     /// <summary>
-    /// Returns the player with the highest MVP score, or null if no scores exist.
+    /// Returns the player with the highest positive MVP score, or null if no contribution was recorded.
     /// </summary>
     public Player? GetMvp(List<PlayerScore> playerScores)
     {
         try
         {
-            return playerScores.OrderByDescending(p => p.Score).FirstOrDefault()?.Player;
+            return playerScores
+                .Where(p => p.Player != null && double.IsFinite(p.Score) && p.Score > 0)
+                .OrderByDescending(p => p.Score).FirstOrDefault()?.Player;
         }
         catch (Exception ex)
         {

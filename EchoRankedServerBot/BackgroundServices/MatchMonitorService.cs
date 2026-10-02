@@ -164,6 +164,28 @@ public class MatchMonitorCoordinator(
             return;
         }
 
+        if (MatchResultPolicy.IsCancelled(echoMatch))
+        {
+            logger.LogWarning(
+                "{LoopName}: Match {MatchId}, session {SessionId} ended without a completed round result " +
+                "(status {GameStatus}, rounds blue {BlueRounds}, orange {OrangeRounds}). No stats or MVP MMR will be awarded.",
+                loopName, matchId, sessionId, echoMatch.GameStatus, echoMatch.BlueRoundScore, echoMatch.OrangeRoundScore);
+            matchState.UpdateMatch(matchId, m =>
+            {
+                m.EchoMatchInstance!.PostingStats = true;
+                if (m.PrivateMatchDetails != null) m.PrivateMatchDetails.MatchStarting = false;
+            });
+            try
+            {
+                await UpdateCancelledMatchMessageAsync(rankedMatch);
+            }
+            finally
+            {
+                lifecycle.StopMatchMonitoring(matchId, newInstance: true);
+            }
+            return;
+        }
+
         var token = await nakamaApi.GetNakamaTokenAsync();
         if (token == null)
         {
@@ -188,10 +210,8 @@ public class MatchMonitorCoordinator(
                 m.EchoMatchInstance.LastScore = lastScored;
             });
 
-            var orangeWins = echoMatch.OrangeRoundScore > echoMatch.BlueRoundScore;
-            var winningTeam = orangeWins ? "orange" : "blue";
-
-            if (echoMatch.GameStatus == "post_match" && !rankedMatch.EchoMatchInstance.PostingStats)
+            if (MatchResultPolicy.TryGetWinningTeam(echoMatch, out var winningTeam) &&
+                !rankedMatch.EchoMatchInstance.PostingStats)
             {
                 matchState.UpdateMatch(matchId, m => m.EchoMatchInstance!.PostingStats = true);
 
@@ -212,6 +232,7 @@ public class MatchMonitorCoordinator(
                         logger.LogWarning(
                             "{LoopName}: Failed to reward MVP MMR for Discord member {MemberId} in match {MatchId}, so no MMR was awarded.",
                             loopName, player.MemberId, matchId);
+                        continue;
                     }
 
                     var liveChannel = discord.GetTextChannel(options.Value.LiveMatchesChannelId);
@@ -639,8 +660,34 @@ public class MatchMonitorCoordinator(
         return long.TryParse(dash >= 0 ? evrId[(dash + 1)..] : evrId, out var id) && id == accountNumber;
     }
 
+    private async Task UpdateCancelledMatchMessageAsync(EchoMatch match)
+    {
+        var channel = discord.GetTextChannel(options.Value.LiveMatchesChannelId);
+        if (channel == null || match.PrivateMatchDetails?.LiveMatchMessageId is not ulong messageId)
+            return;
+
+        try
+        {
+            if (await channel.GetMessageAsync(messageId) is not IUserMessage message) return;
+            var embed = message.Embeds.FirstOrDefault()?.ToEmbedBuilder() ?? new EmbedBuilder()
+                .WithTitle($"Match for: {GetQueueName(match)}")
+                .WithFooter("Echo Ranked • Server Manager");
+            embed.WithColor(Color.Orange)
+                .WithDescription("Match cancelled • no completed round result. No MVP MMR awarded.")
+                .WithTimestamp(DateTimeOffset.UtcNow);
+            await message.ModifyAsync(properties => properties.Embed = embed.Build());
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to mark live match message {MessageId} as cancelled for match {MatchId}",
+                messageId, match.MatchId);
+        }
+    }
+
     private static string FormatGameStatus(EchoVrApiSession session)
     {
+        if (MatchResultPolicy.IsCancelled(session)) return "Match cancelled • no completed round result";
+
         var status = session.GameStatus switch
         {
             "pre_match" => "Waiting to start",
