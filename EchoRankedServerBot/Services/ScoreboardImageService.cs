@@ -11,7 +11,7 @@ public class ScoreboardImageService(IOptions<BotOptions> options, ILogger<Scoreb
 {
     private readonly Lazy<SKTypeface> _typeface = new(() => LoadTypeface(options.Value.ScoreboardFontPath, logger));
 
-    private static readonly SKPoint[] FramedRoundWinCenters = [new(425, 557.5f), new(511.5f, 557.5f), new(598, 557.5f)];
+    private static readonly SKPoint[] FramedRoundWinCenters = [new(425, 582.5f), new(511.5f, 582.5f), new(598, 582.5f)];
 
     // Coordinates for the 1024px templates; blue rows precede orange rows.
     private static readonly ScoreboardRegions ClassicRegions = new(
@@ -25,12 +25,12 @@ public class ScoreboardImageService(IOptions<BotOptions> options, ILogger<Scoreb
 
     private static readonly ScoreboardRegions FramedRegions = new(
         [76, 384, 478, 569, 653, 740, 828, 915, 1006],
-        [(670, 738), (745, 814), (821, 890), (897, 966),
-         (180, 238), (245, 303), (310, 367), (374, 432)],
+        [(695, 763), (771, 838), (847, 914), (923, 990),
+         (185, 247), (254, 316), (323, 385), (392, 454)],
         new(184, 52, 435, 102), new(784, 52, 984, 102),
-        new(36, 512, 217, 569), new(805, 512, 987, 569),
-        new(389, 481, 635, 535),
-        new(256, 512, 351, 569), new(674, 512, 769, 569));
+        new(36, 536, 217, 595), new(805, 536, 987, 595),
+        new(389, 494, 635, 550),
+        new(256, 536, 351, 595), new(674, 536, 769, 595));
 
     private sealed record ScoreboardRegions(
         float[] ColumnEdges, (float Top, float Bottom)[] Rows,
