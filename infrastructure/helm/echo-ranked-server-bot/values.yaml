@@ -13,6 +13,9 @@ fullnameOverride: echo-ranked-server-bot
 # Font file on the bot's data volume; the scoreboard falls back to Arial when it is missing
 scoreboardFontPath: /app/data/fonts/EchoStencil.ttf
 
+# Layout matching the bundled scoreboard template
+scoreboardLayout: Framed
+
 serviceAccount:
   create: true
   name: ""

@@ -63,6 +63,8 @@ spec:
               value: /app/data/bot-config.json
             - name: Bot__ScoreboardFontPath
               value: {{ .Values.scoreboardFontPath | quote }}
+            - name: Bot__ScoreboardLayout
+              value: {{ .Values.scoreboardLayout | quote }}
           volumeMounts:
             - name: configuration
               mountPath: /app/appsettings.json
