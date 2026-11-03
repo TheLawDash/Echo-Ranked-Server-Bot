@@ -113,19 +113,17 @@ public class LiveTelemetryService(
     private async Task<string?> FindStreamIdAsync(string sessionId, CancellationToken ct)
     {
         using var client = factory.CreateClient("Streaming");
-        var json = await client.GetStringAsync($"{options.Value.BaseUrl.TrimEnd('/')}/api/v3/stream", ct);
+        var url = $"{options.Value.BaseUrl.TrimEnd('/')}/api/v3/stream/{Uri.EscapeDataString(sessionId)}/info";
+        using var response = await client.GetAsync(url, ct);
 
-        using var doc = JsonDocument.Parse(json);
-        if (!doc.RootElement.TryGetProperty("streams", out var streams)) return null;
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
 
-        foreach (var stream in streams.EnumerateArray())
-        {
-            var matchId = stream.GetProperty("match_id").GetString();
-            if (matchId != null && matchId.Split('.')[0].Equals(sessionId, StringComparison.OrdinalIgnoreCase))
-                return matchId;
-        }
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var root = doc.RootElement;
+        if (!root.TryGetProperty("status", out var status) || status.GetString() != "live") return null;
 
-        return null;
+        return root.TryGetProperty("match_id", out var matchId) ? matchId.GetString() : null;
     }
 
     private async Task ReadStreamAsync(string streamId, LiveMatchState state, CancellationToken ct)
