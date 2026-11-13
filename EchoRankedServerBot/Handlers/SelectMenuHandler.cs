@@ -13,6 +13,12 @@ public class SelectMenuHandler(
     IOptions<BotOptions> options,
     ILogger<SelectMenuHandler> logger)
 {
+    private static EchoRankedServerBot.Models.Nakama.MatchLabel? FirstUnassignedWithRegionPrefix(
+        EchoRankedServerBot.Models.Nakama.NakamaMatches matches, string prefix) =>
+        matches.Labels.FirstOrDefault(x =>
+            x.LobbyType.Contains("unassigned", StringComparison.OrdinalIgnoreCase) &&
+            x.Broadcaster.RegionCodes.Any(code => code.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
+
     public async Task HandleSelectMenuExecutedAsync(SocketMessageComponent component)
     {
         if (component.Data.CustomId != "test_server_select")
@@ -49,10 +55,9 @@ public class SelectMenuHandler(
 
             var selectedMatch = selectedValue switch
             {
-                "chicago" => matches.Labels.FirstOrDefault(x =>
-                    x.Broadcaster.RegionCodes.Contains(options.Value.ChicagoRegionCode) && x.LobbyType.Contains("unassigned")),
-                "dallas" => matches.Labels.FirstOrDefault(x =>
-                    x.Broadcaster.RegionCodes.Contains(options.Value.DallasRegionCode) && x.LobbyType.Contains("unassigned")),
+                "chicago" => FirstUnassignedWithRegionPrefix(matches, "echovrce-chi-comp"),
+                "kci" => FirstUnassignedWithRegionPrefix(matches, "echovrce-kci-comp"),
+                "dallas" => FirstUnassignedWithRegionPrefix(matches, "echovrce-dal-comp"),
                 "eu" => matches.Labels.FirstOrDefault(x =>
                     x.Broadcaster.Tags.Contains("180hz") && x.Broadcaster.RegionCodes.Contains(options.Value.ChicagoRegionCode) && x.LobbyType.Contains("unassigned")),
                 "nebraska" => matches.Labels.FirstOrDefault(x =>
