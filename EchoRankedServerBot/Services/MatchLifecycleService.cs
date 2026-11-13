@@ -13,12 +13,13 @@ namespace EchoRankedServerBot.Services;
 public class MatchLifecycleService(
     NakamaApiService nakamaApi,
     IpGeolocationService ipGeo,
-    ServerDecisionService decision,
     MatchStateService matchState,
     DiscordChannelService discord,
     LiveTelemetryService telemetry,
     ILogger<MatchLifecycleService> logger)
 {
+    private const int MaxPrepareAttempts = 8;
+
     /// <summary>
     /// Attempts to extract the raw Discord user ID from a mention string such as "<@123456789>".
     /// Returns false and an empty ID if the input does not have the expected shape.
@@ -168,45 +169,19 @@ public class MatchLifecycleService(
             return null;
         }
 
-        ServerDecisionResult? serverDecision = null;
-        if (players is not null && players.Count != 0)
-        {
-            serverDecision = await decision.DecideBestServerAsync(echoMatches, players, token);
-        }
-        else
-        {
-            logger.LogInformation("Latency-based server decision skipped (no players provided)");
-        }
-
-        var echoMatch = serverDecision?.Match ?? nakamaApi.GetEmptyEchoMatchAsync(echoMatches, containsEu);
-
-        if (serverDecision is null)
-        {
-            logger.LogInformation("Latency data not available for selection, using default server ordering");
-        }
-
-        if (echoMatch is null)
-        {
-            logger.LogError("Failed to find an empty Echo match in CreateRankedEchoMatchAsync");
-            return null;
-        }
-
         if (rankedMatch.PrivateMatchDetails is null)
         {
             logger.LogError("Invalid private match details in CreateRankedEchoMatchAsync");
             return null;
         }
 
-        var regionLabel = serverDecision?.RegionLabel
-                          ?? ServerDecisionService.GetRegionLabel(echoMatch.Broadcaster.RegionCodes);
-        var regionCode = serverDecision?.RegionCode
-                         ?? echoMatch.Broadcaster.RegionCodes.FirstOrDefault();
-
-        rankedMatch.PrivateMatchDetails.DecidedRegion = regionCode is not null
-            ? $"{regionLabel} ({regionCode})"
-            : regionLabel;
-        rankedMatch.PrivateMatchDetails.DecidedAverageLatency = serverDecision?.AverageLatency;
-        rankedMatch.PrivateMatchDetails.PlayersUsedForDecision = serverDecision?.PlayersUsed;
+        var candidates = nakamaApi.GetServerCandidates(echoMatches, containsEu);
+        if (candidates.Count == 0)
+        {
+            logger.LogError("No unassigned Echo servers were available in CreateRankedEchoMatchAsync out of {MatchCount} matches",
+                echoMatches.Labels.Count);
+            return null;
+        }
 
         var queueChannel = discord.GetTextChannel(rankedMatch.PrivateMatchDetails.QueueChannelId);
         if (queueChannel is null)
@@ -217,18 +192,45 @@ public class MatchLifecycleService(
         }
         var queueName = queueChannel?.Name ?? "unknown-queue";
 
-        var matchId = await nakamaApi.PrepareEchoMatchAsync(echoMatch, token, players, queueName);
-        if (matchId is null)
+        MatchLabel? echoMatch = null;
+        var attempts = 0;
+        foreach (var candidate in candidates.Take(MaxPrepareAttempts))
         {
-            logger.LogWarning("Failed to prepare Echo match. Attempting backup");
-
-            matchId = await nakamaApi.BackupPrepareEchoMatchAsync(echoMatch, token, players, queueName);
-            if (matchId is null)
+            attempts++;
+            var matchId = await nakamaApi.PrepareEchoMatchAsync(candidate, token, players, queueName)
+                          ?? await nakamaApi.BackupPrepareEchoMatchAsync(candidate, token, players, queueName);
+            if (matchId is not null)
             {
-                logger.LogError("Backup preparation also failed in CreateRankedEchoMatchAsync");
-                return null;
+                echoMatch = candidate;
+                break;
             }
+
+            logger.LogWarning(
+                "Could not prepare server {Endpoint} ({RegionCodes}) for {QueueName} with either guild, trying the next one",
+                candidate.Broadcaster.Endpoint, string.Join(",", candidate.Broadcaster.RegionCodes), queueName);
         }
+
+        if (echoMatch is null)
+        {
+            logger.LogError("Failed to prepare any of {Attempts} servers for {QueueName} in CreateRankedEchoMatchAsync",
+                attempts, queueName);
+            return null;
+        }
+
+        if (attempts > 1)
+        {
+            logger.LogWarning("Pulled server {Endpoint} for {QueueName} after {Attempts} attempts",
+                echoMatch.Broadcaster.Endpoint, queueName, attempts);
+        }
+
+        var regionLabel = ServerDecisionService.GetRegionLabel(echoMatch.Broadcaster.RegionCodes);
+        var regionCode = echoMatch.Broadcaster.RegionCodes.FirstOrDefault(c => !c.StartsWith("0x"));
+
+        rankedMatch.PrivateMatchDetails.DecidedRegion = regionCode is not null
+            ? $"{regionLabel} ({regionCode})"
+            : regionLabel;
+        rankedMatch.PrivateMatchDetails.DecidedAverageLatency = null;
+        rankedMatch.PrivateMatchDetails.PlayersUsedForDecision = null;
 
         if (players is null)
         {

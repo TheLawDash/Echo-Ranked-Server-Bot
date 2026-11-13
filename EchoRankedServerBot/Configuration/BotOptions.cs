@@ -27,6 +27,7 @@ public class BotOptions
     public string RankedCompRegionCode { get; set; } = string.Empty;
     public string OmahaRegionCode { get; set; } = string.Empty;
     public string PgvDcCevrRegionCode { get; set; } = string.Empty;
+    public string[] PreferredRegionCodePrefixes { get; set; } = [];
     public string ScoreboardFontPath { get; set; } = string.Empty;
     public ScoreboardLayout ScoreboardLayout { get; set; } = ScoreboardLayout.Framed;
 }

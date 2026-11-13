@@ -321,41 +321,12 @@ public class NakamaApiService(
         }
     }
 
+    public static readonly string[] DefaultPreferredRegionCodePrefixes =
+        ["echovrce-chi-comp", "echovrce-kci-comp", "echovrce-dal-comp"];
+
     public MatchLabel? GetEmptyEchoMatchAsync(NakamaMatches matches, bool containEu = false)
     {
-        logger.LogDebug("Searching for an empty Echo match among {Count} candidates. ContainEu: {ContainEu}", matches.Labels.Count, containEu);
-
-        // Remove unwanted matches from labels
-        matches.Labels = matches.Labels
-            .Where(x => !x.Id.Contains(nakamaOptions.Value.ExcludedBroadcasterId))
-            .ToList();
-
-        // Define prioritized search conditions
-        var searchConditions = new List<Func<MatchLabel, bool>>
-        {
-            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.ChicagoRegionCode) && x.LobbyType.Contains("unassigned"),
-            x => containEu && x.Broadcaster.Tags.Contains("180hz") && x.Broadcaster.RegionCodes.Contains(botOptions.Value.ChicagoRegionCode) && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.RankedCompRegionCode) && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.DallasRegionCode) && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.OmahaRegionCode) && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains(botOptions.Value.PgvDcCevrRegionCode) && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains("180hz") && x.Broadcaster.Tags.Contains("ranked-central") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.RegionCodes.Contains("comp") && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.Endpoint.Contains(botOptions.Value.NebraskaServerIp) && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.Endpoint.Contains(botOptions.Value.FallbackServerIp) && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.Endpoint.Contains(botOptions.Value.PennsylvaniaServerIp) && x.LobbyType.Contains("unassigned"),
-            x => x.Broadcaster.Endpoint.Contains(botOptions.Value.KansasServerIp) && x.LobbyType.Contains("unassigned"),
-            x => x.LobbyType.Contains("unassigned")
-        };
-
-        MatchLabel? empty = null;
-
-        foreach (var condition in searchConditions)
-        {
-            empty = matches.Labels.FirstOrDefault(condition);
-            if (empty is not null)
-                break;
-        }
+        var empty = GetServerCandidates(matches, containEu).FirstOrDefault();
 
         if (empty is not null)
         {
@@ -368,6 +339,76 @@ public class NakamaApiService(
         }
 
         return empty;
+    }
+
+    /// <summary>
+    /// Every unassigned server, best first: the preferred region prefixes in order (Chicago,
+    /// Kansas City, Dallas by default), then the legacy rules, then any other unassigned server.
+    /// Callers try them in turn, so one server refusing a prepare does not fail the pull.
+    /// </summary>
+    public List<MatchLabel> GetServerCandidates(NakamaMatches matches, bool containEu = false)
+    {
+        logger.LogDebug("Ordering server candidates among {Count} matches. ContainEu: {ContainEu}", matches.Labels.Count, containEu);
+
+        var excluded = nakamaOptions.Value.ExcludedBroadcasterId;
+        var unassigned = matches.Labels
+            .Where(x => string.IsNullOrWhiteSpace(excluded) || !x.Id.Contains(excluded))
+            .Where(x => x.LobbyType.Contains("unassigned", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var prefixes = botOptions.Value.PreferredRegionCodePrefixes is { Length: > 0 } configured
+            ? configured
+            : DefaultPreferredRegionCodePrefixes;
+
+        var searchConditions = new List<Func<MatchLabel, bool>>();
+        foreach (var prefix in prefixes.Where(p => !string.IsNullOrWhiteSpace(p)))
+        {
+            searchConditions.Add(x => x.Broadcaster.RegionCodes.Any(code =>
+                code.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        var bot = botOptions.Value;
+        bool HasRegion(MatchLabel x, string code) =>
+            !string.IsNullOrWhiteSpace(code) && x.Broadcaster.RegionCodes.Contains(code);
+        bool HasIp(MatchLabel x, string ip) =>
+            !string.IsNullOrWhiteSpace(ip) && x.Broadcaster.Endpoint.Contains(ip);
+
+        // Legacy rules, kept after the preferred regions in case those servers come back
+        searchConditions.AddRange(new List<Func<MatchLabel, bool>>
+        {
+            x => HasRegion(x, bot.ChicagoRegionCode),
+            x => containEu && x.Broadcaster.Tags.Contains("180hz") && HasRegion(x, bot.ChicagoRegionCode),
+            x => HasRegion(x, bot.RankedCompRegionCode),
+            x => HasRegion(x, bot.DallasRegionCode),
+            x => HasRegion(x, bot.OmahaRegionCode),
+            x => HasRegion(x, bot.PgvDcCevrRegionCode),
+            x => x.Broadcaster.RegionCodes.Contains("180hz") && x.Broadcaster.Tags.Contains("ranked-central"),
+            x => x.Broadcaster.RegionCodes.Contains("comp"),
+            x => HasIp(x, bot.NebraskaServerIp),
+            x => HasIp(x, bot.FallbackServerIp),
+            x => HasIp(x, bot.PennsylvaniaServerIp),
+            x => HasIp(x, bot.KansasServerIp),
+        });
+
+        var ordered = new List<MatchLabel>();
+        var seen = new HashSet<string>();
+        foreach (var condition in searchConditions)
+        {
+            foreach (var match in unassigned.Where(condition))
+            {
+                if (seen.Add(match.Id))
+                    ordered.Add(match);
+            }
+        }
+
+        // Fail open: any other unassigned server goes last
+        foreach (var match in unassigned)
+        {
+            if (seen.Add(match.Id))
+                ordered.Add(match);
+        }
+
+        return ordered;
     }
 
     public async Task<string?> PrepareEchoMatchAsync(

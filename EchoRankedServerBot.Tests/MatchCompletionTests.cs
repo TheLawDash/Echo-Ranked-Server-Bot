@@ -11,7 +11,7 @@ namespace EchoRankedServerBot.Tests;
 public class MatchCompletionTests
 {
     private static MatchLifecycleService Lifecycle() => new(
-        null!, null!, null!, null!, null!, null!, NullLogger<MatchLifecycleService>.Instance);
+        null!, null!, null!, null!, null!, NullLogger<MatchLifecycleService>.Instance);
 
     private static LiveMatchState NewState()
     {
